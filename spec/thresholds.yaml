@@ -18,13 +18,13 @@ model_gates:
   tolerance_delta_pp: 0.1     # δ for tolerance accuracy, in percentage points of efficiency
   tolerance_accuracy_min_percent: 80.0
   r2_min: 0.90
-  fit_r2_gap_min: 0.05        # good fit: train R² − test R² ≥ this (below = underfitting)
-  fit_r2_gap_max: 0.1         # good fit: train R² − test R² < this (at or above = overfitting)
   cv_folds: 5
   cv_r2_std_max: 0.03
+  early_stopping_margin: 100  # keep a final-round buffer before the last training rounds are considered a failure
 
 input_limits:                 # physical sanity limits for validation (reject outside)
   voltage_v:      { min: 0.0,   max: 10.0 }
   current_a:      { min: -500.0, max: 500.0 }
   temperature_c:  { min: -40.0, max: 100.0 }
   duration_min:   { min: 0.0,   max: 1440.0, exclusive_min: true }
+  soc_percent:    { min: 0.0,   max: 100.0 }

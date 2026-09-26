@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from sklearn.metrics import r2_score
 
-from formulatech.ml.metrics import classify_fit, r2, tolerance_accuracy
+from formulatech.ml.metrics import evaluate_gates, r2, tolerance_accuracy
 from formulatech.ml.train import FEATURES, LEAKY_COLUMNS, fit_with_early_stopping, load_data, split_data
 
 
@@ -28,18 +28,21 @@ def test_mq3_r2_matches_sklearn():
     assert r2(y_true, y_pred) == pytest.approx(r2_score(y_true, y_pred))
 
 
-@pytest.mark.parametrize(
-    "r2_train, r2_test, expected",
-    [
-        (0.99, 0.80, "overfit"),  # MQ-4:  gap 0.19
-        (0.97, 0.95, "underfit"),  # MQ-4a: gap 0.02
-        (0.99, 0.93, "good"),  # MQ-4b: gap 0.06
-        (0.95, 0.90, "good"),  # MQ-4c: gap exactly 0.05
-        (1.00, 0.90, "overfit"),  # MQ-4c: gap exactly 0.1
-    ],
-)
-def test_mq4_classify_fit(r2_train, r2_test, expected):
-    assert classify_fit(r2_train, r2_test, gap_min=0.05, gap_max=0.1) == expected
+GATES_CFG = {"tolerance_accuracy_min_percent": 80.0, "r2_min": 0.90, "cv_r2_std_max": 0.03, "early_stopping_margin": 100}
+PASSING_METRICS = {"tolerance_accuracy": 100.0, "r2_train": 0.9997, "r2_test": 0.9974, "r2_gap": 0.0023,
+                   "cv_r2_mean": 0.9976, "cv_r2_std": 0.0004, "best_iteration": 8000, "n_estimators": 10000}
+
+
+def test_mq4_r2_gap_is_information_only():
+    gates = evaluate_gates(PASSING_METRICS, GATES_CFG)
+    assert "good_fit" not in gates
+    assert gates["gates_passed"] is True
+
+
+def test_mq4a_early_stopping_fails_on_last_round():
+    gates = evaluate_gates({**PASSING_METRICS, "best_iteration": 9999, "n_estimators": 10000}, GATES_CFG)
+    assert gates["early_stopping"] is False
+    assert gates["gates_passed"] is False
 
 
 def test_mq5_split_is_80_20_and_disjoint():

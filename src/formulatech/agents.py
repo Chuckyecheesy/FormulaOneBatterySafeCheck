@@ -35,7 +35,7 @@ LLM_NUM_PREDICT = 150  # NFR-1: keep explanations short
 
 
 class RaceState(TypedDict):
-    inputs: dict[str, float]  # voltage_v, current_a, temperature_c, duration_min
+    inputs: dict[str, float]  # voltage_v, current_a, temperature_c, duration_min, soc_percent
     stage_results: list[dict[str, Any]]  # check result records, appended by each node
     explanations: list[str]  # LLM text only; never read back into the verdict
     verdict: str | None  # set only by the decision node, from compute_verdict
@@ -105,9 +105,7 @@ def template_message(result: dict[str, Any], inputs: dict[str, float], cfg: dict
                 f"Efficiency model not validated, so the race cannot be cleared. "
                 f"Tolerance accuracy: {_rate(rec['tolerance_accuracy'])} % "
                 f"(needs > {_fmt(gates['tolerance_accuracy_min_percent'])} %), "
-                f"R²: {_rate(rec['r2'])} (needs > {_fmt(gates['r2_min'])}), "
-                f"train − test R² gap: {_rate(rec['r2_gap'])} = {result.get('fit_status', 'unknown')} "
-                f"(needs {_fmt(gates['fit_r2_gap_min'])} ≤ gap < {_fmt(gates['fit_r2_gap_max'])})."
+                f"R²: {_rate(rec['r2'])} (needs > {_fmt(gates['r2_min'])})."
             )
     return f"{result['reason']}."
 
@@ -163,7 +161,7 @@ def get_model_status() -> dict[str, Any]:
     """Read the saved metadata from the trained model. Missing metadata means not validated."""
     if not META_PATH.exists():
         return {"version": None, "gates_passed": False, "tolerance_accuracy": None, "r2": None,
-                "r2_train": None, "cv_mean": None, "cv_std": None, "fit_status": "unknown"}
+                "r2_train": None, "cv_mean": None, "cv_std": None}
 
     with META_PATH.open() as fh:
         meta = json.load(fh)
@@ -178,12 +176,13 @@ def get_model_status() -> dict[str, Any]:
         "r2_train": metrics.get("r2_train"),
         "cv_mean": metrics.get("cv_r2_mean"),
         "cv_std": metrics.get("cv_r2_std"),
-        "fit_status": metrics.get("fit_status", "unknown"),
     }
 
 
-def predict_efficiency(voltage_v: float, current_a: float, temperature_c: float, duration_min: float) -> float:
-    """Load the saved XGBoost model and predict battery efficiency (duration in minutes)."""
+def predict_efficiency(
+    voltage_v: float, current_a: float, temperature_c: float, duration_min: float, soc_percent: float
+) -> float:
+    """Load the saved XGBoost model and predict battery efficiency (duration in minutes, SOC in %)."""
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Trained model not found at {MODEL_PATH}")
 
@@ -191,6 +190,7 @@ def predict_efficiency(voltage_v: float, current_a: float, temperature_c: float,
     model.load_model(str(MODEL_PATH))
     X = pd.DataFrame(
         [{
+            "SOC (%)": soc_percent,
             "Voltage (V)": voltage_v,
             "Current (A)": current_a,
             "Battery Temp (°C)": temperature_c,
@@ -204,23 +204,25 @@ def predict_efficiency(voltage_v: float, current_a: float, temperature_c: float,
 def _model_not_validated(status: dict[str, Any], cfg: dict, reason: str) -> dict[str, Any]:
     """R6 record. Stage 3 fails closed (FR-4)."""
     g = cfg["model_gates"]
-    gap = None
-    if status.get("r2_train") is not None and status.get("r2") is not None:
-        gap = round(status["r2_train"] - status["r2"], COMPARE_DECIMALS)
     return {
         "rule": "R6",
         "code": "MODEL_NOT_VALIDATED",
         "passed": False,
-        "recorded": {"tolerance_accuracy": status.get("tolerance_accuracy"), "r2": status.get("r2"), "r2_gap": gap},
+        "recorded": {
+            "tolerance_accuracy": status.get("tolerance_accuracy"),
+            "r2": status.get("r2"),
+            "cv_r2_mean": status.get("cv_mean"),
+            "cv_r2_std": status.get("cv_std"),
+        },
         "recorded_kind": "calculated",
         "thresholds": {
             "tolerance_accuracy": f"> {_fmt(g['tolerance_accuracy_min_percent'])}",
             "r2": f"> {_fmt(g['r2_min'])}",
-            "r2_gap": f">= {_fmt(g['fit_r2_gap_min'])} and < {_fmt(g['fit_r2_gap_max'])}",
+            "cv_r2_mean": f"> {_fmt(g['r2_min'])}",
+            "cv_r2_std": f"≤ {_fmt(g['cv_r2_std_max'])}",
         },
-        "unit": {"tolerance_accuracy": "%", "r2": "", "r2_gap": ""},
+        "unit": {"tolerance_accuracy": "%", "r2": "", "cv_r2_mean": "", "cv_r2_std": ""},
         "reason": reason,
-        "fit_status": status.get("fit_status", "unknown"),
     }
 
 
@@ -231,7 +233,7 @@ def evaluate_prediction(inputs: dict[str, float], cfg: dict) -> dict[str, Any]:
         return _model_not_validated(status, cfg, "Efficiency model not validated")
     try:
         raw = predict_efficiency(inputs["voltage_v"], inputs["current_a"], inputs["temperature_c"],
-                                 inputs["duration_min"])
+                                 inputs["duration_min"], inputs["soc_percent"])
     except Exception:
         logger.exception("Efficiency prediction failed")
         return _model_not_validated(status, cfg, "Efficiency model could not produce a prediction")

@@ -36,8 +36,8 @@ The four agents are nodes in a **LangGraph** `StateGraph`. Each node runs its de
 ### Agent 3 — Prediction Agent
 - **Job:** check the efficiency prediction result.
 - **Tools:**
-  - `get_model_status() → {version, gates_passed, tolerance_accuracy, r2, r2_train, cv_mean, cv_std, fit_status: "good" | "underfit" | "overfit"}`
-  - `predict_efficiency(voltage_v, current_a, temp_c, duration_min) → {efficiency_pct}`
+  - `get_model_status() → {version, gates_passed, tolerance_accuracy, r2, r2_train, cv_mean, cv_std}`
+  - `predict_efficiency(voltage_v, current_a, temp_c, duration_min, soc_percent) → {efficiency_pct}`
 - **Logic (in tool code):** if `gates_passed = false`, return R6 without predicting. Otherwise predict and apply R5.
 - **Output:** the prediction, the model quality summary, and an explanation.
 
@@ -72,7 +72,7 @@ The four agents are nodes in a **LangGraph** `StateGraph`. Each node runs its de
 
 ```python
 class CheckState(TypedDict):
-    inputs: dict              # V, I, T_t, duration_min, t_seconds
+    inputs: dict              # V, I, T_t, duration_min, t_seconds, soc_percent
     stage_results: list[dict] # check result records (02-safety-rules.md), appended by each node
     explanations: list[str]   # one per agent, written by the LLM
     verdict: str | None       # set only by Agent 4, from compute_verdict

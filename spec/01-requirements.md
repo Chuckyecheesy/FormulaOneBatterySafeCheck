@@ -2,7 +2,7 @@
 
 ## 1. Inputs
 
-The operator enters exactly four values:
+The operator enters exactly five values:
 
 | # | Field | Symbol | Unit (entered) | Example | Internal unit | Conversion |
 |---|-------|--------|----------------|---------|---------------|------------|
@@ -10,15 +10,18 @@ The operator enters exactly four values:
 | 2 | Battery current | `I` | A | `0`, `0.5`, `-1.2` | A | none (negative allowed) |
 | 3 | Battery temperature | `T_t` | °C | `25`, `33.4` | °C | none |
 | 4 | Charging duration | `t` | **minutes** | `60` | **seconds** | `t = minutes × 60` |
+| 5 | State of charge | `SOC` | % | `50`, `80` | % | none |
 
 - `T_t` is the battery temperature entered by the user. It is the temperature measured after the battery has been charging for time `t`.
 - `t` (in seconds) is used by every rate calculation in [02-safety-rules.md](02-safety-rules.md).
 - The efficiency model in [03-ml-model.md](03-ml-model.md) takes duration in **minutes**, because the training data is stored in minutes.
+- `SOC` is used only by the efficiency model (stage 3). No safety rule in stages 1–2 reads it.
 
 ### 1.1 Validation (applied before any rule runs)
 
-- **IN-1** All four fields are required and must be finite numbers. Empty, non-numeric, `NaN` and infinite values are rejected. Decimals are allowed, and negative values are allowed for every field except duration.
+- **IN-1** All five fields are required and must be finite numbers. Empty, non-numeric, `NaN` and infinite values are rejected. Decimals are allowed, and negative values are allowed for every field except duration and SOC.
 - **IN-2** Charging duration must be **>= 0**. `t = 0` makes dT/dt undefined, so the form rejects it with the message *"Charging duration must be greater than 0 minutes."*
+- **IN-2a** SOC must be between 0 and 100 %.
 - **IN-3** Values outside the physical sanity limits in `thresholds.yaml → input_limits` are rejected with a field-level error. These limits catch typos. They are not hazard thresholds.
 - **IN-4** Invalid input never produces a verdict. The UI shows the field errors and no result.
 
