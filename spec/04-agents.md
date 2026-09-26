@@ -65,7 +65,7 @@ The four agents are nodes in a **LangGraph** `StateGraph`. Each node runs its de
 
 - **Orchestration:** LangGraph (`langgraph`). One `StateGraph` with the four nodes above and `add_conditional_edges` for the two short-circuits.
 - **LLM:** Ollama, running locally (`ollama serve`, default `http://localhost:11434`), called through `langchain-ollama` (`ChatOllama`).
-- **Model:** default `llama3.1:8b`. Configurable in settings (for example `qwen2.5:7b`). The model is used only to write explanations, so it doesn't need to be reliable at tool calling.
+- **Model:** default `llama3.2` (the 3B model). Configurable in settings (for example `llama3.1:8b` or `qwen2.5:7b`). The model is used only to write explanations, so it doesn't need to be reliable at tool calling.
 - Everything runs on the local machine. No battery data leaves it.
 
 ### 3.2 Graph state

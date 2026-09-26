@@ -1,106 +1,169 @@
-"""LangGraph-based AI agent layer for the race readiness checker.
+"""LangGraph-based AI agent layer for the race readiness checker (spec/04-agents.md).
 
-This module implements the four-agent flow described in spec/04-agents.md while
-keeping the final verdict deterministic and local to the machine. The LLM is used
-only for explanations; it never decides whether a check passes or fails.
+Code decides, agents explain: every node runs its deterministic check in code, then
+asks a local Ollama model to explain the result. The LLM text only goes into
+`explanations`; routing, `verdict`, `failures` and `summary` come from `stage_results`.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import logging
+import math
+import re
+from dataclasses import asdict
 from typing import Any, Callable, TypedDict
 
 import pandas as pd
-from langchain_core.messages import HumanMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 from xgboost import XGBRegressor
 
-from formulatech.config import REPO_ROOT, load_thresholds
+from formulatech.config import MODELS_DIR, load_thresholds
 from formulatech.ml.train import FEATURES
-from formulatech.rules import check_overcharge, check_thermal
+from formulatech.rules import COMPARE_DECIMALS, check_overcharge, check_thermal
 
-MODEL_DIR = REPO_ROOT / "models"
-MODEL_PATH = MODEL_DIR / "efficiency_model.json"
-META_PATH = MODEL_DIR / "efficiency_model_meta.json"
+logger = logging.getLogger(__name__)
+
+MODEL_PATH = MODELS_DIR / "efficiency_model.json"
+META_PATH = MODELS_DIR / "efficiency_model_meta.json"
+
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_MODEL = "llama3.2"
+LLM_TIMEOUT_S = 8  # NFR-2: fall back to the template after this
+LLM_NUM_PREDICT = 150  # NFR-1: keep explanations short
 
 
 class RaceState(TypedDict):
-    inputs: dict[str, float]
-    stage_results: list[dict[str, Any]]
-    explanations: list[str]
-    verdict: str | None
+    inputs: dict[str, float]  # voltage_v, current_a, temperature_c, duration_min
+    stage_results: list[dict[str, Any]]  # check result records, appended by each node
+    explanations: list[str]  # LLM text only; never read back into the verdict
+    verdict: str | None  # set only by the decision node, from compute_verdict
     failures: list[dict[str, Any]]
     summary: str
 
 
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
+# ---------------------------------------------------------------------------
+# Template messages (spec/05-ui.md §3.1). Thresholds are filled in from cfg.
+# ---------------------------------------------------------------------------
 
 
-def _as_serializable(value: Any) -> Any:
-    if hasattr(value, "__dict__"):
-        return value.__dict__
-    return value
+def _fmt(value: float) -> str:
+    return f"{value:g}"
 
 
-def _template_fallback(stage: str, result: dict[str, Any]) -> str:
-    code = result.get("code", "CHECK")
-    return (
-        f"Template explanation for {stage}: the deterministic safety check reported "
-        f"{code}. The local model explanation was unavailable, so the system used the "
-        "fallback message while keeping the computed verdict unchanged."
+def _rate(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.4g}"  # 4 significant figures
+
+
+def _temp(value: float) -> str:
+    return f"{value:.2f}"  # 2 decimal places
+
+
+def template_message(result: dict[str, Any], inputs: dict[str, float], cfg: dict) -> str:
+    """Plain-language message for a failed check, used as the fallback and in the summary."""
+    rec, th, gates = result["recorded"], cfg["thermal"], cfg["model_gates"]
+    t0 = _fmt(th["initial_temp_c"])
+    t_c = _temp(inputs["temperature_c"])
+    match result["code"]:
+        case "OVERCHARGED":
+            oc = cfg["overcharge"]
+            return (
+                f"Battery already overcharged. Battery voltage: {_fmt(rec['V'])} V, "
+                f"battery current: {_fmt(rec['I'])} A. Battery voltage hazard threshold: "
+                f"> {_fmt(oc['voltage_max_v'])} V. Battery current hazard threshold: "
+                f"< {_fmt(oc['current_max_a'])} A. (Unsafe when both are true.)"
+            )
+        case "HIGH_DTDT":
+            t_s = _fmt(inputs["duration_min"] * 60)
+            return (
+                f"Thermal stress from battery charging is at high risk. dT/dt: {_rate(rec['dT_dt'])} °C/s "
+                f"(calculated from T = {t_c} °C, T0 = {t0} °C, t = {t_s} s). "
+                f"Hazard threshold: > {_fmt(th['dT_dt_max_c_per_s'])} °C/s."
+            )
+        case "HIGH_D2TDT2":
+            return (
+                f"Heat is increasing at a very fast rate while the battery charges. "
+                f"d²T/dt²: {_rate(rec['d2T_dt2'])} °C/s². "
+                f"Hazard threshold: > {_fmt(th['d2T_dt2_max_c_per_s2'])} °C/s²."
+            )
+        case "HIGH_TCHEM":
+            return (
+                f"Heat exposure to the surrounding environment is too high. "
+                f"T_chem: {_temp(rec['T_chem'])} °C (= max(0, {t_c} − {t0})). "
+                f"Hazard threshold: > {_fmt(th['t_chem_max_c'])} °C."
+            )
+        case "LOW_EFFICIENCY":
+            return (
+                f"Predicted efficiency is too low, so the car cannot proceed into the race. "
+                f"Predicted efficiency: {_temp(rec['efficiency_pct'])} % "
+                f"(XGBoost model v{result.get('model_version')}). "
+                f"Required to pass: ≥ {_fmt(cfg['efficiency']['min_percent'])} %."
+            )
+        case "MODEL_NOT_VALIDATED":
+            return (
+                f"Efficiency model not validated, so the race cannot be cleared. "
+                f"Tolerance accuracy: {_rate(rec['tolerance_accuracy'])} % "
+                f"(needs > {_fmt(gates['tolerance_accuracy_min_percent'])} %), "
+                f"R²: {_rate(rec['r2'])} (needs > {_fmt(gates['r2_min'])}), "
+                f"train − test R² gap: {_rate(rec['r2_gap'])} = {result.get('fit_status', 'unknown')} "
+                f"(needs {_fmt(gates['fit_r2_gap_min'])} ≤ gap < {_fmt(gates['fit_r2_gap_max'])})."
+            )
+    return f"{result['reason']}."
+
+
+# ---------------------------------------------------------------------------
+# LLM explanation with fallback
+# ---------------------------------------------------------------------------
+
+
+def _default_model_factory(model_name: str, base_url: str) -> ChatOllama:
+    return ChatOllama(
+        model=model_name,
+        base_url=base_url,
+        temperature=0,
+        num_predict=LLM_NUM_PREDICT,
+        client_kwargs={"timeout": LLM_TIMEOUT_S},
     )
 
 
-def _safe_model_factory(model_name: str = DEFAULT_OLLAMA_MODEL, base_url: str = DEFAULT_OLLAMA_URL):
-    try:
-        from langchain_ollama import ChatOllama
-    except ImportError as exc:  # pragma: no cover - handled by runtime fallback
-        raise RuntimeError("langchain-ollama is not installed") from exc
-    return ChatOllama(model=model_name, base_url=base_url, temperature=0.0)
-
-
-def _explain_with_llm(
-    model: Any,
-    stage: str,
-    result: dict[str, Any],
-    *,
-    model_factory: Callable[..., Any] | None = None,
-) -> str:
-    if model is None and model_factory is not None:
-        try:
-            model = model_factory()
-        except Exception:
-            return _template_fallback(stage, result)
-
-    if model is None:
-        return _template_fallback(stage, result)
-
+def explain(llm: Any, result: dict[str, Any], fallback: str) -> str:
+    """Ask the LLM to explain a computed result. Fall back to the template on any error (NFR-2)."""
+    if llm is None:
+        return fallback
+    payload = {k: v for k, v in result.items() if k not in {"rule", "code", "stage"}}
     prompt = (
-        "You are an assistant that explains a battery safety check to a driver. "
-        "Do not change the verdict or say that the model decided the pass/fail. "
-        "Describe only the result in plain language and include the recorded numeric value(s) "
-        "and threshold(s) from the JSON below. Do not mention rule IDs or reason codes.\n\n"
-        f"RESULT_JSON={json.dumps(result, sort_keys=True, default=str)}"
+        "Explain this battery safety check result to a race engineer in one or two sentences. "
+        "Do not change the result. Include the recorded value(s) and threshold(s). "
+        "Do not mention rule IDs or reason codes.\n"
+        f"RESULT_JSON={json.dumps(payload, default=str)}"
     )
-
     try:
-        response = model.invoke(prompt)
-        if hasattr(response, "content"):
-            content = response.content
-        else:
-            content = str(response)
-        return str(content).strip() or _template_fallback(stage, result)
-    except Exception:
-        return _template_fallback(stage, result)
+        response = llm.invoke(prompt)
+        text = str(getattr(response, "content", response)).strip()
+    except Exception:  # Ollama down, error, or timeout
+        logger.warning("LLM explanation failed; using template message", exc_info=True)
+        return fallback
+    return text or fallback
+
+
+_PROCEED_CLAIM = re.compile(r"\b(can|may|safe to|able to|cleared to)\s+proceed\b|^\s*proceed\b", re.I)
+
+
+def _claims_proceed(text: str) -> bool:
+    return bool(_PROCEED_CLAIM.search(text)) and not re.search(r"\b(not|cannot|can't)\s+proceed\b", text, re.I)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic stage 3 tools
+# ---------------------------------------------------------------------------
 
 
 def get_model_status() -> dict[str, Any]:
-    """Read the saved metadata from the trained model, if present."""
+    """Read the saved metadata from the trained model. Missing metadata means not validated."""
     if not META_PATH.exists():
-        return {"version": None, "gates_passed": False, "tolerance_accuracy": None, "r2": None, "cv_mean": None, "cv_std": None, "fit_status": "unknown"}
+        return {"version": None, "gates_passed": False, "tolerance_accuracy": None, "r2": None,
+                "r2_train": None, "cv_mean": None, "cv_std": None, "fit_status": "unknown"}
 
     with META_PATH.open() as fh:
         meta = json.load(fh)
@@ -120,7 +183,7 @@ def get_model_status() -> dict[str, Any]:
 
 
 def predict_efficiency(voltage_v: float, current_a: float, temperature_c: float, duration_min: float) -> float:
-    """Load the saved XGBoost model and predict battery efficiency."""
+    """Load the saved XGBoost model and predict battery efficiency (duration in minutes)."""
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Trained model not found at {MODEL_PATH}")
 
@@ -135,188 +198,163 @@ def predict_efficiency(voltage_v: float, current_a: float, temperature_c: float,
         }],
         columns=FEATURES,
     )
-    pred = model.predict(X)
-    return float(pred[0])
+    return float(model.predict(X)[0])
 
 
-def _result_to_dict(result: Any) -> dict[str, Any]:
-    if isinstance(result, dict):
-        return result
-    if hasattr(result, "__dict__"):
-        payload = result.__dict__.copy()
-        payload["passed"] = getattr(result, "passed")
-        return payload
-    return {"value": result}
+def _model_not_validated(status: dict[str, Any], cfg: dict, reason: str) -> dict[str, Any]:
+    """R6 record. Stage 3 fails closed (FR-4)."""
+    g = cfg["model_gates"]
+    gap = None
+    if status.get("r2_train") is not None and status.get("r2") is not None:
+        gap = round(status["r2_train"] - status["r2"], COMPARE_DECIMALS)
+    return {
+        "rule": "R6",
+        "code": "MODEL_NOT_VALIDATED",
+        "passed": False,
+        "recorded": {"tolerance_accuracy": status.get("tolerance_accuracy"), "r2": status.get("r2"), "r2_gap": gap},
+        "recorded_kind": "calculated",
+        "thresholds": {
+            "tolerance_accuracy": f"> {_fmt(g['tolerance_accuracy_min_percent'])}",
+            "r2": f"> {_fmt(g['r2_min'])}",
+            "r2_gap": f">= {_fmt(g['fit_r2_gap_min'])} and < {_fmt(g['fit_r2_gap_max'])}",
+        },
+        "unit": {"tolerance_accuracy": "%", "r2": "", "r2_gap": ""},
+        "reason": reason,
+        "fit_status": status.get("fit_status", "unknown"),
+    }
+
+
+def evaluate_prediction(inputs: dict[str, float], cfg: dict) -> dict[str, Any]:
+    """R5/R6 in code: R6 if the model is not validated or cannot predict, else R5 with strict `<`."""
+    status = get_model_status()
+    if not status["gates_passed"]:
+        return _model_not_validated(status, cfg, "Efficiency model not validated")
+    try:
+        raw = predict_efficiency(inputs["voltage_v"], inputs["current_a"], inputs["temperature_c"],
+                                 inputs["duration_min"])
+    except Exception:
+        logger.exception("Efficiency prediction failed")
+        return _model_not_validated(status, cfg, "Efficiency model could not produce a prediction")
+    if not math.isfinite(raw):
+        return _model_not_validated(status, cfg, "Efficiency model could not produce a prediction")
+
+    eff = round(raw, COMPARE_DECIMALS)
+    min_pct = cfg["efficiency"]["min_percent"]
+    return {
+        "rule": "R5",
+        "code": "LOW_EFFICIENCY",
+        "passed": not eff < min_pct,
+        "recorded": {"efficiency_pct": eff},
+        "recorded_kind": "calculated",
+        "thresholds": {"efficiency_pct": f"< {_fmt(min_pct)}"},
+        "unit": {"efficiency_pct": "%"},
+        "reason": "Predicted efficiency is too low, so the car cannot proceed into the race",
+        "model_version": status["version"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Verdict (deterministic)
+# ---------------------------------------------------------------------------
 
 
 def compute_verdict(stage_results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Deterministic final verdict: only the tool result decides pass/fail."""
-    failures = [res for res in stage_results if not res.get("passed", True)]
-    verdict = "DO_NOT_PROCEED" if failures else "CAN_PROCEED"
-
-    summary = (
-        "Battery is safe to proceed into the race."
-        if verdict == "CAN_PROCEED"
-        else "Battery does not meet the pass criteria and must not proceed into the race."
-    )
-
+    """Final verdict: CAN_PROCEED only if every check that ran passed (FR-5)."""
+    failures = [r for r in stage_results if not r["passed"]]
     return {
-        "verdict": verdict,
-        "failures": [
-            {k: v for k, v in res.items() if k not in {"stage", "passed"}}
-            for res in failures
-        ],
-        "summary": summary,
+        "verdict": "DO_NOT_PROCEED" if failures else "CAN_PROCEED",
+        "failures": [{k: v for k, v in r.items() if k not in {"stage", "passed"}} for r in failures],
     }
 
 
-def _append_result(state: RaceState, stage: int, result: Any) -> None:
-    payload = _result_to_dict(result)
-    payload["stage"] = stage
-    state["stage_results"].append(payload)
+def _any_failed(results: list[dict[str, Any]]) -> bool:
+    return any(not r["passed"] for r in results)
 
 
-def _node_overcharge(state: RaceState, *, model_factory: Callable[..., Any] | None = None) -> RaceState:
-    cfg = load_thresholds()
-    result = check_overcharge(state["inputs"]["voltage_v"], state["inputs"]["current_a"], cfg)
-    _append_result(state, 1, result)
-
-    explanation = _explain_with_llm(None, "overcharge", _result_to_dict(result), model_factory=model_factory)
-    state["explanations"].append(explanation)
-    return state
-
-
-def _node_thermal(state: RaceState, *, model_factory: Callable[..., Any] | None = None) -> RaceState:
-    cfg = load_thresholds()
-    results = check_thermal(state["inputs"]["temperature_c"], state["inputs"]["duration_min"], cfg)
-    for item in results:
-        _append_result(state, 2, item)
-
-    for item in results:
-        explanation = _explain_with_llm(None, "thermal", _result_to_dict(item), model_factory=model_factory)
-        state["explanations"].append(explanation)
-    return state
-
-
-def _node_prediction(state: RaceState, *, model_factory: Callable[..., Any] | None = None) -> RaceState:
-    cfg = load_thresholds()
-    threshold = cfg["efficiency"]["min_percent"]
-
-    status = get_model_status()
-    if not status["gates_passed"]:
-        result = {
-            "rule": "R6",
-            "code": "MODEL_NOT_VALIDATED",
-            "passed": False,
-            "recorded": {"gates_passed": status["gates_passed"]},
-            "recorded_kind": "model",
-            "thresholds": {"gates_passed": "true"},
-            "unit": {"gates_passed": "bool"},
-            "reason": "Model does not pass the required validation gates.",
-        }
-        _append_result(state, 3, result)
-        explanation = _explain_with_llm(None, "prediction", result, model_factory=model_factory)
-        state["explanations"].append(explanation)
-        return state
-
-    try:
-        efficiency = predict_efficiency(
-            state["inputs"]["voltage_v"],
-            state["inputs"]["current_a"],
-            state["inputs"]["temperature_c"],
-            state["inputs"]["duration_min"],
-        )
-    except Exception:
-        efficiency = float("nan")
-        result = {
-            "rule": "R5",
-            "code": "LOW_EFFICIENCY",
-            "passed": False,
-            "recorded": {"efficiency_pct": efficiency},
-            "recorded_kind": "calculated",
-            "thresholds": {"efficiency_pct": f"< {threshold}"},
-            "unit": {"efficiency_pct": "%"},
-            "reason": "Prediction could not be generated and the model is treated as invalid.",
-        }
-        _append_result(state, 3, result)
-        explanation = _explain_with_llm(None, "prediction", result, model_factory=model_factory)
-        state["explanations"].append(explanation)
-        return state
-
-    passed = efficiency >= threshold
-    result = {
-        "rule": "R5",
-        "code": "LOW_EFFICIENCY" if not passed else "EFFICIENCY_OK",
-        "passed": passed,
-        "recorded": {"efficiency_pct": efficiency},
-        "recorded_kind": "calculated",
-        "thresholds": {"efficiency_pct": f"< {threshold}"},
-        "unit": {"efficiency_pct": "%"},
-        "reason": "Prediction is below the minimum efficiency threshold." if not passed else "Prediction is above the threshold.",
-    }
-    _append_result(state, 3, result)
-    explanation = _explain_with_llm(None, "prediction", result, model_factory=model_factory)
-    state["explanations"].append(explanation)
-    return state
-
-
-def _node_decision(state: RaceState) -> RaceState:
-    verdict = compute_verdict(state["stage_results"])
-    state["verdict"] = verdict["verdict"]
-    state["failures"] = verdict["failures"]
-    state["summary"] = verdict["summary"]
-    return state
-
-
-def _route_after_overcharge(state: RaceState) -> str:
-    return "decision" if any(not item.get("passed", True) for item in state["stage_results"]) else "thermal"
-
-
-def _route_after_thermal(state: RaceState) -> str:
-    return "decision" if any(not item.get("passed", True) for item in state["stage_results"]) else "prediction"
-
-
-def _route_after_prediction(state: RaceState) -> str:
-    return "decision"
+# ---------------------------------------------------------------------------
+# Graph
+# ---------------------------------------------------------------------------
 
 
 def build_race_graph(
     *,
     model_name: str = DEFAULT_OLLAMA_MODEL,
     base_url: str = DEFAULT_OLLAMA_URL,
-    model_factory: Callable[..., Any] | None = None,
+    model_factory: Callable[[], Any] | None = None,
+    cfg: dict | None = None,
 ):
-    """Build the four-node LangGraph state machine from the spec."""
+    """Build the four-node StateGraph: Overcharge → Thermal → Prediction → Race Decision."""
+    cfg = cfg if cfg is not None else load_thresholds()
+    factory = model_factory or (lambda: _default_model_factory(model_name, base_url))
+    try:
+        llm = factory()
+    except Exception:
+        logger.warning("Could not create the LLM; all explanations will use templates", exc_info=True)
+        llm = None
+
+    def explained(state: RaceState, results: list[dict[str, Any]], stage: int) -> dict:
+        """Partial update: append results; explain only the failures (nothing to explain on a pass)."""
+        results = [{**r, "stage": stage} for r in results]
+        new = [explain(llm, r, template_message(r, state["inputs"], cfg)) for r in results if not r["passed"]]
+        return {"stage_results": state["stage_results"] + results, "explanations": state["explanations"] + new}
+
+    # Agent 1: Overcharge (stage 1)
+    def overcharge_node(state: RaceState) -> dict:
+        i = state["inputs"]
+        return explained(state, [asdict(check_overcharge(i["voltage_v"], i["current_a"], cfg))], 1)
+
+    # Agent 2: Thermal (stage 2); all three rules always run (FR-2)
+    def thermal_node(state: RaceState) -> dict:
+        i = state["inputs"]
+        return explained(state, [asdict(r) for r in check_thermal(i["temperature_c"], i["duration_min"], cfg)], 2)
+
+    # Agent 3: Prediction (stage 3)
+    def prediction_node(state: RaceState) -> dict:
+        return explained(state, [evaluate_prediction(state["inputs"], cfg)], 3)
+
+    # Agent 4: Race Decision; no LLM for verdict, failures or summary
+    def decision_node(state: RaceState) -> dict:
+        result = compute_verdict(state["stage_results"])
+        if result["verdict"] == "CAN_PROCEED":
+            summary = "CAN PROCEED into the race."
+        else:  # state every failed check reason
+            summary = "DO NOT PROCEED. " + " ".join(
+                template_message(f, state["inputs"], cfg) for f in result["failures"]
+            )
+            for text in state["explanations"]:
+                if _claims_proceed(text):
+                    logger.warning("LLM explanation contradicts computed verdict %s: %r", result["verdict"], text)
+        return {**result, "summary": summary}
+
+    # Routing reads stage_results, never LLM output
+    def route_after_overcharge(state: RaceState) -> str:
+        return "decision" if _any_failed(state["stage_results"]) else "thermal"
+
+    def route_after_thermal(state: RaceState) -> str:
+        return "decision" if _any_failed(state["stage_results"]) else "prediction"
+
     graph = StateGraph(RaceState)
-
-    if model_factory is None:
-        def model_factory():
-            return _safe_model_factory(model_name=model_name, base_url=base_url)
-
-    graph.add_node("overcharge", lambda s: _node_overcharge(s, model_factory=model_factory))
-    graph.add_node("thermal", lambda s: _node_thermal(s, model_factory=model_factory))
-    graph.add_node("prediction", lambda s: _node_prediction(s, model_factory=model_factory))
-    graph.add_node("decision", _node_decision)
-
+    graph.add_node("overcharge", overcharge_node)
+    graph.add_node("thermal", thermal_node)
+    graph.add_node("prediction", prediction_node)
+    graph.add_node("decision", decision_node)
     graph.add_edge(START, "overcharge")
-    graph.add_conditional_edges("overcharge", _route_after_overcharge, {"decision": "decision", "thermal": "thermal"})
-    graph.add_conditional_edges("thermal", _route_after_thermal, {"decision": "decision", "prediction": "prediction"})
-    graph.add_conditional_edges("prediction", _route_after_prediction, {"decision": "decision"})
+    graph.add_conditional_edges("overcharge", route_after_overcharge, {"thermal": "thermal", "decision": "decision"})
+    graph.add_conditional_edges("thermal", route_after_thermal, {"prediction": "prediction", "decision": "decision"})
+    graph.add_edge("prediction", "decision")
     graph.add_edge("decision", END)
     return graph.compile()
 
 
 def run_race_assessment(inputs: dict[str, float], *, graph=None) -> RaceState:
-    """Execute the graph for a single battery reading."""
+    """Execute the graph for a single, already-validated battery reading."""
     if graph is None:
         graph = build_race_graph()
-
-    state: RaceState = {
+    return graph.invoke({
         "inputs": inputs,
         "stage_results": [],
         "explanations": [],
         "verdict": None,
         "failures": [],
         "summary": "",
-    }
-    return graph.invoke(state)
+    })
