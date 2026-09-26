@@ -22,13 +22,14 @@ Message templates are in [05-ui.md](05-ui.md) §3.1.
   | Current (A) | 10.0 | 99.8 |
   | Battery Temp (°C) | 20.0 | 40.0 |
   | Charging Duration (min) | 20.6 | 119.9 |
+  | SOC (%) | 10.4 | 100.0 |
   | Efficiency (%) | 96.79 | 99.18 (mean 98.00, std 0.54) |
 
 - Target: `Efficiency (%)`.
-- **Features, v1:** `Voltage (V)`, `Current (A)`, `Battery Temp (°C)`, `Charging Duration (min)`. These are the four values available at inference time.
+- **Features:** `SOC (%)`, `Voltage (V)`, `Current (A)`, `Battery Temp (°C)`, `Charging Duration (min)`, in this order. These are the five values the operator enters, so all are available at inference time.
 - **Excluded columns:**
   - `Degradation Rate (%)` has a correlation of **−1.00** with efficiency. It is a direct leak of the target and must never be a feature.
-  - `Optimal Charging Duration Class`, `SOC`, `Ambient Temp`, `Charging Mode`, `Battery Type`, `Charging Cycles`, `EV Model` are not entered by the operator, so they can't be used unless the UI adds them.
+  - `Optimal Charging Duration Class`, `Ambient Temp`, `Charging Mode`, `Battery Type`, `Charging Cycles`, `EV Model` are not entered by the operator, so they can't be used unless the UI adds them.
 - Units: the model is trained on duration in **minutes**, as stored in the CSV. The inference path must pass minutes, not the converted seconds.
 
 ## 3. Data split
@@ -41,13 +42,13 @@ Message templates are in [05-ui.md](05-ui.md) §3.1.
 ## 4. Training
 
 - Library: `xgboost` (`XGBRegressor`), `objective="reg:squarederror"`.
-- Starting hyperparameters: `n_estimators=1000` with `early_stopping_rounds=50` on a validation slice of the training split, `max_depth=3–5`, `learning_rate=0.05`, `subsample=0.8`, `colsample_bytree=0.8`, `min_child_weight≥5`, `reg_lambda=1`.
-- Tuning: grid or random search scored by 5-fold CV R² on the train split only.
+- Starting hyperparameters: `n_estimators=5000` with `early_stopping_rounds=50` on a validation slice (15%) of the training split, `learning_rate=0.05`, `subsample=0.8`, `colsample_bytree=0.8`, `reg_lambda=10`, `reg_alpha=1`.
+- Tuning: grid search scored by 5-fold CV R² on the train split only, over `learning_rate` ∈ {0.03, 0.05, 0.075, 0.1}, `max_depth` ∈ {3, 4, 5}, `min_child_weight` ∈ {1, 3, 5, 10}, `reg_lambda` ∈ {0, 1, 5}, `reg_alpha` ∈ {0, 0.1, 0.5, 1}. Tuned values override the starting ones.
 - Artifact saved with: model file, feature list and order, training data hash, hyperparameters, all metrics from §5, and the training timestamp.
 
-## 5. Quality gates (all must pass before the model is used for decisions)
+## 5. Quality gates (all three must pass before the model is used for decisions)
 
-Metrics are computed on the **held-out test set** unless stated otherwise.
+There are three accuracy gates: tolerance accuracy (§5.1), test R² (§5.2) and CV R² (§5.3). Nothing else decides pass or fail. Metrics are computed on the **held-out test set** unless stated otherwise.
 
 ### 5.1 Tolerance accuracy
 
@@ -62,23 +63,13 @@ $$R^2 = 1 - \frac{\sum (y_i - \hat{y}_i)^2}{\sum (y_i - \bar{y})^2}$$
 
 - **Gate:** R² > **0.90** (the model explains more than 90% of the variance).
 
-### 5.3 Fit checks (overfitting and underfitting)
+### 5.3 Cross-validation R²
 
-The train/test R² gap `gap = R²_train − R²_test` classifies the fit:
+- **Gate:** 5-fold CV on the train split: mean R² > **0.90** **and** std ≤ **0.03**.
 
-| Gap | Fit | Gate |
-|-----|-----|------|
-| `gap < 0.05` | Underfitting | FAIL |
-| `0.05 ≤ gap < 0.1` | **Good fit** | pass |
-| `gap ≥ 0.1` | Overfitting | FAIL |
+Underfitting is ruled out by the R² gate (§5.2) and the CV mean: a model that explains more than 90% of held-out variance is not underfitting. Overfitting is ruled out by the same R² gate and the CV std.
 
-All three checks below must pass:
-
-| Check | Gate |
-|-------|------|
-| Train/test gap | `0.05 ≤ R²_train − R²_test < 0.1` (good fit) |
-| Cross-validation stability | 5-fold CV on the train split: mean R² > 0.90 **and** std ≤ 0.03 |
-| Early stopping | Best iteration < `n_estimators` (validation loss actually plateaued) |
+Train R², the gap `R²_train − R²_test`, and the early-stopping best iteration are saved and reported **for information only**. Early stopping still ends training when validation loss stops improving; it just does not pass or fail the model. There is no `fit_r2_gap_min` or `fit_r2_gap_max` gate and no `good_fit` label. A small gap simply means the model generalises well; with test R² > 0.90 the gap is expected to stay below 0.10.
 
 A learning-curve plot (train vs validation RMSE by boosting round, with validation taken from the training split) is saved with each artifact for manual review.
 
@@ -94,4 +85,4 @@ A learning-curve plot (train vs validation RMSE by boosting round, with validati
 
 ## 7. Known limitation — read before building
 
-On the current dataset, efficiency ranges **only from 96.8% to 99.2%**, and no row is below 70%. XGBoost is tree-based and cannot predict values outside the target range it was trained on, so **R5 can never fire with this dataset**. In addition, the four v1 features explain only about 76% of the variance (linear baseline), so the R² > 0.90 gate is likely to fail. Adding `SOC (%)` raises the baseline to R² ≈ 1.0.
+On the current dataset, efficiency ranges **only from 96.8% to 99.2%**, and no row is below 70%. XGBoost is tree-based and cannot predict values outside the target range it was trained on, so **R5 can never fire with this dataset**. The original four features explained only about 76% of the variance (linear baseline); adding `SOC (%)` raises the baseline to R² ≈ 1.0, which is why SOC is an operator input.

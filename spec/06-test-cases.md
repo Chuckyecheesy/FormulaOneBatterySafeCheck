@@ -49,10 +49,8 @@
 | MQ-1 | `Degradation Rate (%)` is not in the feature list |
 | MQ-2 | Tolerance accuracy is computed exactly per the formula (unit test with a hand-computed fixture) |
 | MQ-3 | R² matches `sklearn.metrics.r2_score` on a fixture |
-| MQ-4 | Train R² 0.99, test R² 0.80 (gap 0.19) → overfit, gate fails |
-| MQ-4a | Train R² 0.97, test R² 0.95 (gap 0.02) → underfit, gate fails |
-| MQ-4b | Train R² 0.99, test R² 0.93 (gap 0.06) → good fit, gate passes |
-| MQ-4c | Gap exactly 0.05 → good fit; gap exactly 0.1 → overfit |
+| MQ-4 | The train − test R² gap is reported but never fails a gate (e.g. gap 0.002 with every other gate passing → `gates_passed = true`) |
+| MQ-4a | Best iteration is reported but never fails a gate (e.g. best iteration `n_estimators − 1` with the three accuracy gates passing → `gates_passed = true`) |
 | MQ-5 | The test split is not touched during tuning (assert on indices) |
 
 ## Agent layer

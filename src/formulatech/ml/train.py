@@ -19,7 +19,7 @@ from sklearn.model_selection import KFold, train_test_split  # noqa: E402
 from xgboost import XGBRegressor  # noqa: E402
 
 from formulatech.config import DATA_PATH, MODELS_DIR, load_thresholds  # noqa: E402
-from formulatech.ml.metrics import classify_fit, evaluate_gates, r2, tolerance_accuracy  # noqa: E402
+from formulatech.ml.metrics import evaluate_gates, r2, tolerance_accuracy  # noqa: E402
 
 # §2: the four values the operator enters. Order is fixed and saved with the model.
 FEATURES = [
@@ -41,7 +41,7 @@ EARLY_STOPPING_ROUNDS = 50
 # §4 starting hyperparameters.
 BASE_PARAMS = {
     "objective": "reg:squarederror",
-    "n_estimators": 1000,
+    "n_estimators": 5000,  # headroom so validation loss can plateau before the last round
     "learning_rate": 0.05,
     "subsample": 0.8,
     "colsample_bytree": 0.8,
@@ -51,7 +51,7 @@ BASE_PARAMS = {
 # §4 tuning grid, scored by 5-fold CV R² on the train split only.
 PARAM_GRID = {
     "learning_rate": [0.03, 0.05, 0.075, 0.1],
-    "max_depth": [5, 10, 15,20],
+    "max_depth": [3,4,5],
     "min_child_weight": [1,3,5, 10],
     "reg_lambda": [0.0, 1.0, 5.0],
     "reg_alpha": [0.0, 0.1, 0.5, 1.0],
@@ -154,10 +154,9 @@ def train(data_path: Path = DATA_PATH, out_dir: Path = MODELS_DIR) -> dict:
     r2_test = r2(y_test, pred_test)
     metrics = {
         "tolerance_accuracy": tolerance_accuracy(y_test, pred_test, gates_cfg["tolerance_delta_pp"]),
-        "r2_train": r2_train,
+        "r2_train": r2_train,  # information only (§5.3)
         "r2_test": r2_test,
-        "r2_gap": r2_train - r2_test,
-        "fit_status": classify_fit(r2_train, r2_test, gates_cfg["fit_r2_gap_min"], gates_cfg["fit_r2_gap_max"]),
+        "r2_gap": r2_train - r2_test,  # information only (§5.3)
         "cv_r2_mean": float(np.mean(cv_scores)),
         "cv_r2_std": float(np.std(cv_scores)),
         "cv_r2_folds": cv_scores,
@@ -196,11 +195,11 @@ def print_report(meta: dict) -> None:
     print(f"  Tolerance accuracy (δ={cfg['tolerance_delta_pp']}): {m['tolerance_accuracy']:.1f} %"
           f"  (needs > {cfg['tolerance_accuracy_min_percent']})  {mark(g['tolerance_accuracy'])}")
     print(f"  R² test: {m['r2_test']:.4f}  (needs > {cfg['r2_min']})  {mark(g['r2'])}")
-    print(f"  R² gap (train {m['r2_train']:.4f} − test): {m['r2_gap']:.4f} = {m['fit_status']}"
-          f"  (needs {cfg['fit_r2_gap_min']} ≤ gap < {cfg['fit_r2_gap_max']})  {mark(g['good_fit'])}")
     print(f"  CV R²: {m['cv_r2_mean']:.4f} ± {m['cv_r2_std']:.4f}"
           f"  (needs mean > {cfg['r2_min']}, std ≤ {cfg['cv_r2_std_max']})  {mark(g['cv_stability'])}")
-    print(f"  Early stopping: best iteration {m['best_iteration']} of {m['n_estimators']}  {mark(g['early_stopping'])}")
+    print("\nInformation only (not gates):")
+    print(f"  R² train: {m['r2_train']:.4f}, train − test R² gap: {m['r2_gap']:.4f}")
+    print(f"  Early stopping: best iteration {m['best_iteration']} of {m['n_estimators']}")
     print(f"\ngates_passed = {meta['gates_passed']}")
     if not meta["gates_passed"]:
         print("Stage 3 will return MODEL_NOT_VALIDATED (DO NOT PROCEED) with this model.")

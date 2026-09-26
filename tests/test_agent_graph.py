@@ -7,10 +7,11 @@ import pytest
 from formulatech import agents
 from formulatech.agents import build_race_graph, run_race_assessment, template_message
 from formulatech.config import load_thresholds
+from formulatech.ml.train import FEATURES
 
-OVERCHARGED = {"voltage_v": 5.0, "current_a": -1.2, "temperature_c": 25.0, "duration_min": 60}  # S1-1
-HOT = {"voltage_v": 3.9, "current_a": 0.5, "temperature_c": 30.0, "duration_min": 1}  # S2-4
-CLEAN = {"voltage_v": 3.9, "current_a": 0.5, "temperature_c": 25.0, "duration_min": 60}
+OVERCHARGED = {"voltage_v": 5.0, "current_a": -1.2, "temperature_c": 25.0, "duration_min": 60, "soc_percent": 50.0}  # S1-1
+HOT = {"voltage_v": 3.9, "current_a": 0.5, "temperature_c": 30.0, "duration_min": 1, "soc_percent": 50.0}  # S2-4
+CLEAN = {"voltage_v": 3.9, "current_a": 0.5, "temperature_c": 25.0, "duration_min": 60, "soc_percent": 50.0}
 
 
 class FakeChatModel:
@@ -36,7 +37,7 @@ def _run(inputs, llm):
 def validated_model(monkeypatch):
     """Model gates passed; the prediction is set per test."""
     status = {"version": "test", "gates_passed": True, "tolerance_accuracy": 95.0, "r2": 0.95,
-              "r2_train": 0.99, "cv_mean": 0.95, "cv_std": 0.01, "fit_status": "good"}
+              "r2_train": 0.99, "cv_mean": 0.95, "cv_std": 0.01}
     monkeypatch.setattr(agents, "get_model_status", lambda: status)
 
     def set_prediction(value):
@@ -131,7 +132,7 @@ def test_s3_3_exactly_at_threshold_passes(validated_model):
 def test_s3_4_model_not_validated(monkeypatch):
     monkeypatch.setattr(agents, "get_model_status", lambda: {
         "version": "test", "gates_passed": False, "tolerance_accuracy": 24.0, "r2": 0.76,
-        "r2_train": 0.84, "fit_status": "good"})
+        "r2_train": 0.84})
     state = _run(CLEAN, FakeChatModel())
 
     assert state["verdict"] == "DO_NOT_PROCEED"
@@ -149,3 +150,36 @@ def test_prediction_error_fails_closed(validated_model, monkeypatch):
 
     assert state["verdict"] == "DO_NOT_PROCEED"
     assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
+
+
+def test_predict_efficiency_passes_soc_to_model(monkeypatch, tmp_path):
+    seen = {}
+
+    class FakeModel:
+        def load_model(self, path):
+            pass
+
+        def predict(self, X):
+            seen["X"] = X
+            return [98.0]
+
+    model_file = tmp_path / "model.json"
+    model_file.write_text("{}")
+    monkeypatch.setattr(agents, "MODEL_PATH", model_file)
+    monkeypatch.setattr(agents, "XGBRegressor", FakeModel)
+
+    assert agents.predict_efficiency(3.9, 0.5, 25.0, 60, soc_percent=42.0) == 98.0
+    X = seen["X"]
+    assert list(X.columns) == FEATURES
+    assert X.loc[0, "SOC (%)"] == 42.0
+    assert not X.isna().any().any()
+
+
+def test_missing_soc_fails_closed(validated_model):
+    validated_model(98.0)
+    inputs = {k: v for k, v in CLEAN.items() if k != "soc_percent"}
+    state = _run(inputs, FakeChatModel())
+
+    assert state["verdict"] == "DO_NOT_PROCEED"
+    (failure,) = state["failures"]
+    assert failure["code"] == "MODEL_NOT_VALIDATED"
