@@ -22,7 +22,13 @@ from formulatech.config import DATA_PATH, MODELS_DIR, load_thresholds  # noqa: E
 from formulatech.ml.metrics import classify_fit, evaluate_gates, r2, tolerance_accuracy  # noqa: E402
 
 # §2: the four values the operator enters. Order is fixed and saved with the model.
-FEATURES = ["Voltage (V)", "Current (A)", "Battery Temp (°C)", "Charging Duration (min)"]
+FEATURES = [
+    "SOC (%)",
+    "Voltage (V)",
+    "Current (A)",
+    "Battery Temp (°C)",
+    "Charging Duration (min)",
+]
 TARGET = "Efficiency (%)"
 # Leaks the target (correlation −1.00). Must never be a feature.
 LEAKY_COLUMNS = ["Degradation Rate (%)"]
@@ -39,12 +45,16 @@ BASE_PARAMS = {
     "learning_rate": 0.05,
     "subsample": 0.8,
     "colsample_bytree": 0.8,
-    "reg_lambda": 1.0,
+    "reg_lambda": 10.0,
+    "reg_alpha": 1.0,
 }
 # §4 tuning grid, scored by 5-fold CV R² on the train split only.
 PARAM_GRID = {
-    "max_depth": [3, 4, 5],
-    "min_child_weight": [5, 10],
+    "learning_rate": [0.03, 0.05, 0.075, 0.1],
+    "max_depth": [5, 10, 15,20],
+    "min_child_weight": [1,3,5, 10],
+    "reg_lambda": [0.0, 1.0, 5.0],
+    "reg_alpha": [0.0, 0.1, 0.5, 1.0],
 }
 
 MODEL_FILE = "efficiency_model.json"
@@ -71,9 +81,9 @@ def fit_with_early_stopping(X, y, params: dict) -> tuple[XGBRegressor, tuple]:
     X_fit, X_val, y_fit, y_val = train_test_split(
         X, y, test_size=VALIDATION_SIZE, random_state=RANDOM_STATE
     )
+    model_params = {**BASE_PARAMS, **params}
     model = XGBRegressor(
-        **BASE_PARAMS,
-        **params,
+        **model_params,
         early_stopping_rounds=EARLY_STOPPING_ROUNDS,
         eval_metric="rmse",
         random_state=RANDOM_STATE,

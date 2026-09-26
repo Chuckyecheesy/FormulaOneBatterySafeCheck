@@ -5,13 +5,14 @@ import pytest
 from sklearn.metrics import r2_score
 
 from formulatech.ml.metrics import classify_fit, r2, tolerance_accuracy
-from formulatech.ml.train import FEATURES, LEAKY_COLUMNS, load_data, split_data
+from formulatech.ml.train import FEATURES, LEAKY_COLUMNS, fit_with_early_stopping, load_data, split_data
 
 
 def test_mq1_degradation_rate_not_a_feature():
     assert not set(FEATURES) & set(LEAKY_COLUMNS)
     X, _ = load_data()
     assert "Degradation Rate (%)" not in X.columns
+    assert "SOC (%)" in FEATURES
 
 
 def test_mq2_tolerance_accuracy_hand_computed():
@@ -46,3 +47,14 @@ def test_mq5_split_is_80_20_and_disjoint():
     X_train, X_test, _, _ = split_data(X, y)
     assert len(X_train) == 800 and len(X_test) == 200
     assert set(X_train.index).isdisjoint(X_test.index)
+
+
+def test_fit_with_early_stopping_allows_tuned_learning_rate():
+    X, y = load_data()
+    model, _ = fit_with_early_stopping(
+        X.iloc[:100],
+        y.iloc[:100],
+        {"learning_rate": 0.03, "max_depth": 2, "min_child_weight": 5},
+    )
+    assert model is not None
+    assert len(model.predict(X.iloc[:10])) == 10

@@ -48,4 +48,4 @@ It answers two questions:
 | [07-open-questions.md](07-open-questions.md) | Decisions on d²T/dt², tolerance δ, and the tech stack |
 | [thresholds.yaml](thresholds.yaml) | Every threshold, read by code at runtime |
 
-Thresholds are listed in [../CLAUDE.md](../CLAUDE.md) for reference. Code reads them from [thresholds.yaml](thresholds.yaml).
+Thresholds and rule-logic for agents are listed in [../CLAUDE.md](../CLAUDE.md) for reference. Code reads them from [thresholds.yaml](thresholds.yaml).
