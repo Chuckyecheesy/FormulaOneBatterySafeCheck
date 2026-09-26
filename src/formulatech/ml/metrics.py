@@ -24,13 +24,12 @@ def r2(y_true, y_pred) -> float:
 
 
 def evaluate_gates(metrics: dict, gates_cfg: dict) -> dict:
-    """Apply every quality gate. Returns {gate_name: passed} plus an overall `gates_passed`.
+    """Apply the three accuracy gates: tolerance accuracy, test R², and CV R² (mean and std).
+    Returns {gate_name: passed} plus an overall `gates_passed`.
 
-    `r2_train` and `r2_gap` are information only (§5.3) and are not read here.
-    There is no `fit_r2_gap_min` / `fit_r2_gap_max` gate.
+    `r2_train`, `r2_gap` and `best_iteration` are information only (§5.3) and are not read here.
     """
     rd = lambda x: round(x, COMPARE_DECIMALS)  # noqa: E731
-    headroom = gates_cfg.get("early_stopping_margin", 0)
     gates = {
         "tolerance_accuracy": rd(metrics["tolerance_accuracy"]) > gates_cfg["tolerance_accuracy_min_percent"],
         "r2": rd(metrics["r2_test"]) > gates_cfg["r2_min"],
@@ -38,7 +37,6 @@ def evaluate_gates(metrics: dict, gates_cfg: dict) -> dict:
             rd(metrics["cv_r2_mean"]) > gates_cfg["r2_min"]
             and rd(metrics["cv_r2_std"]) <= gates_cfg["cv_r2_std_max"]
         ),
-        "early_stopping": metrics["best_iteration"] + 1 < (metrics["n_estimators"] - headroom),
     }
     gates["gates_passed"] = all(gates.values())
     return gates

@@ -197,9 +197,9 @@ def print_report(meta: dict) -> None:
     print(f"  R² test: {m['r2_test']:.4f}  (needs > {cfg['r2_min']})  {mark(g['r2'])}")
     print(f"  CV R²: {m['cv_r2_mean']:.4f} ± {m['cv_r2_std']:.4f}"
           f"  (needs mean > {cfg['r2_min']}, std ≤ {cfg['cv_r2_std_max']})  {mark(g['cv_stability'])}")
-    print(f"  Early stopping: best iteration {m['best_iteration']} of {m['n_estimators']}  {mark(g['early_stopping'])}")
     print("\nInformation only (not gates):")
     print(f"  R² train: {m['r2_train']:.4f}, train − test R² gap: {m['r2_gap']:.4f}")
+    print(f"  Early stopping: best iteration {m['best_iteration']} of {m['n_estimators']}")
     print(f"\ngates_passed = {meta['gates_passed']}")
     if not meta["gates_passed"]:
         print("Stage 3 will return MODEL_NOT_VALIDATED (DO NOT PROCEED) with this model.")

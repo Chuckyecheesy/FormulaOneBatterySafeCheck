@@ -17,17 +17,16 @@ Code must read these values from [spec/thresholds.yaml](spec/thresholds.yaml), w
 
 ## Model acceptance thresholds (XGBoost efficiency model)
 
-A trained model may only be used for stage 3 if it passes all of these on the held-out test set:
+A trained model may only be used for stage 3 if it passes all three accuracy gates: tolerance accuracy and R² on the held-out test set, and 5-fold CV R² on the train split:
 
 | ID | Metric | Passes when | Threshold |
 |----|--------|-------------|-----------|
 | `TOL_DELTA` | Tolerance band δ for tolerance accuracy | — | `0.1` percentage points |
 | `TOL_ACC_MIN` | Tolerance accuracy (δ) | `> 80 %` | `80` |
 | `R2_MIN` | R² | `> 0.90` | `0.90` |
-| `CV_R2_STD_MAX` | Overfitting: 5-fold CV R² std (CV mean R² must also be > 0.90) | `≤ 0.03` | `0.03` |
-| — | Early stopping: best iteration < `n_estimators` (validation loss plateaued) | — | — |
+| `CV_R2_STD_MAX` | CV R²: 5-fold CV R² std (CV mean R² must also be > 0.90) | `≤ 0.03` | `0.03` |
 
-Train R² and the train − test R² gap are reported for information only; they are not gates. There is no `fit_r2_gap_min` or `fit_r2_gap_max` gate, and no `good_fit` pass/fail label.
+Train R², the train − test R² gap and the early-stopping best iteration are reported for information only; they are not gates. There is no `fit_r2_gap_min` or `fit_r2_gap_max` gate, and no `good_fit` pass/fail label.
 
 If any gate fails, stage 3 returns R6 `MODEL_NOT_VALIDATED` and the verdict is DO NOT PROCEED.
 

@@ -28,7 +28,7 @@ It answers two questions:
         │ all pass
         ▼
  Stage 3: XGBoost efficiency prediction
-   (model must meet the acceptance gates: tolerance accuracy, R², CV stability, early stopping)
+   (model must meet the acceptance gates: tolerance accuracy, test R², CV R²)
    • efficiency < 70 %            ──────────────► DO NOT PROCEED
         │ pass
         ▼

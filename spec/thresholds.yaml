@@ -20,7 +20,6 @@ model_gates:
   r2_min: 0.90
   cv_folds: 5
   cv_r2_std_max: 0.03
-  early_stopping_margin: 100  # keep a final-round buffer before the last training rounds are considered a failure
 
 input_limits:                 # physical sanity limits for validation (reject outside)
   voltage_v:      { min: 0.0,   max: 10.0 }

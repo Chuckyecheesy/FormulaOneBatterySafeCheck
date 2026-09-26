@@ -50,7 +50,7 @@
 | MQ-2 | Tolerance accuracy is computed exactly per the formula (unit test with a hand-computed fixture) |
 | MQ-3 | R² matches `sklearn.metrics.r2_score` on a fixture |
 | MQ-4 | The train − test R² gap is reported but never fails a gate (e.g. gap 0.002 with every other gate passing → `gates_passed = true`) |
-| MQ-4a | Best iteration equal to the last round (`n_estimators − 1`) → early-stopping gate fails |
+| MQ-4a | Best iteration is reported but never fails a gate (e.g. best iteration `n_estimators − 1` with the three accuracy gates passing → `gates_passed = true`) |
 | MQ-5 | The test split is not touched during tuning (assert on indices) |
 
 ## Agent layer

@@ -28,21 +28,32 @@ def test_mq3_r2_matches_sklearn():
     assert r2(y_true, y_pred) == pytest.approx(r2_score(y_true, y_pred))
 
 
-GATES_CFG = {"tolerance_accuracy_min_percent": 80.0, "r2_min": 0.90, "cv_r2_std_max": 0.03, "early_stopping_margin": 100}
+GATES_CFG = {"tolerance_accuracy_min_percent": 80.0, "r2_min": 0.90, "cv_r2_std_max": 0.03}
 PASSING_METRICS = {"tolerance_accuracy": 100.0, "r2_train": 0.9997, "r2_test": 0.9974, "r2_gap": 0.0023,
                    "cv_r2_mean": 0.9976, "cv_r2_std": 0.0004, "best_iteration": 8000, "n_estimators": 10000}
 
 
-def test_mq4_r2_gap_is_information_only():
+def test_only_three_accuracy_gates():
     gates = evaluate_gates(PASSING_METRICS, GATES_CFG)
-    assert "good_fit" not in gates
+    assert set(gates) == {"tolerance_accuracy", "r2", "cv_stability", "gates_passed"}
+
+
+def test_mq4_r2_gap_is_information_only():
+    gates = evaluate_gates({**PASSING_METRICS, "r2_gap": 0.5}, GATES_CFG)
     assert gates["gates_passed"] is True
 
 
-def test_mq4a_early_stopping_fails_on_last_round():
-    gates = evaluate_gates({**PASSING_METRICS, "best_iteration": 9999, "n_estimators": 10000}, GATES_CFG)
-    assert gates["early_stopping"] is False
-    assert gates["gates_passed"] is False
+def test_mq4a_best_iteration_is_information_only():
+    gates = evaluate_gates({**PASSING_METRICS, "best_iteration": 9999}, GATES_CFG)
+    assert gates["gates_passed"] is True
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"tolerance_accuracy": 80.0}, {"r2_test": 0.90}, {"cv_r2_mean": 0.90}, {"cv_r2_std": 0.031}],
+)
+def test_each_accuracy_gate_can_fail(override):
+    assert evaluate_gates({**PASSING_METRICS, **override}, GATES_CFG)["gates_passed"] is False
 
 
 def test_mq5_split_is_80_20_and_disjoint():
