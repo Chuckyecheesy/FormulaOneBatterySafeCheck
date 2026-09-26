@@ -1,0 +1,30 @@
+# Single source of truth for every threshold in the Race Readiness Checker.
+# Code, agents, and UI messages MUST read values from here — never hard-code them.
+
+overcharge:
+  current_max_a: 0.0          # fail if current  < 0.0 A  (AND voltage condition)
+  voltage_max_v: 4.2          # fail if voltage  > 4.2 V  (AND current condition)
+
+thermal:
+  initial_temp_c: 25.0        # T0, theoretical battery temperature at t = 0
+  dT_dt_max_c_per_s: 0.03     # fail if dT/dt       > 0.03   °C/s
+  d2T_dt2_max_c_per_s2: 0.0005 # fail if d²T/dt²    > 0.0005 °C/s²
+  t_chem_max_c: 0.3           # fail if T_chem      > 0.3    °C
+
+efficiency:
+  min_percent: 70.0           # fail if predicted efficiency < 70 %
+
+model_gates:
+  tolerance_delta_pp: 0.1     # δ for tolerance accuracy, in percentage points of efficiency
+  tolerance_accuracy_min_percent: 80.0
+  r2_min: 0.90
+  fit_r2_gap_min: 0.05        # good fit: train R² − test R² ≥ this (below = underfitting)
+  fit_r2_gap_max: 0.1         # good fit: train R² − test R² < this (at or above = overfitting)
+  cv_folds: 5
+  cv_r2_std_max: 0.03
+
+input_limits:                 # physical sanity limits for validation (reject outside)
+  voltage_v:      { min: 0.0,   max: 10.0 }
+  current_a:      { min: -500.0, max: 500.0 }
+  temperature_c:  { min: -40.0, max: 100.0 }
+  duration_min:   { min: 0.0,   max: 1440.0, exclusive_min: true }
