@@ -39,3 +39,6 @@ File	Contents
 07-open-questions.md	Decisions on d²T/dt², tolerance δ, and the tech stack
 thresholds.yaml	Every threshold, read by code at runtime
 Thresholds and rule-logic for agents are listed in ../CLAUDE.md for reference. Code reads them from thresholds.yaml.
+
+
+More information is inside spec/CLAUDE.md
