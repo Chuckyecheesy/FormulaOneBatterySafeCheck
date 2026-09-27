@@ -31,7 +31,7 @@
 | S3-1 | Model gates passed; prediction 98.2 % | CAN PROCEED |
 | S3-2 | Model gates passed; prediction 65 % (mocked) | DO NOT PROCEED — R5, recorded 65 %, threshold < 70 % |
 | S3-3 | Model gates passed; prediction exactly 70.0 % | CAN PROCEED (strict `<`) |
-| S3-4 | Model `gates_passed = false` (e.g. R² = 0.76) | DO NOT PROCEED — R6, with the metrics listed |
+| S3-4 | The model cannot predict (missing model file, or a NaN/∞ prediction) | Error, no verdict (never CAN PROCEED). Model gates are not checked at runtime |
 
 ## Input validation
 

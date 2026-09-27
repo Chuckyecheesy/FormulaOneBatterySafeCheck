@@ -83,7 +83,7 @@ class RaceState(TypedDict):
     verdict: str | None                  # set only by the decision node, from compute_verdict
     failures: list[dict[str, Any]]
     summary: str
-    comment: str                         # fixed risk comment (05-ui.md §3.2); empty on CAN_PROCEED and R6
+    comment: str                         # fixed risk comment (05-ui.md §3.2); empty on CAN_PROCEED
 
 
 def make_check_tools(cfg: dict) -> dict[str, BaseTool]:
@@ -101,7 +101,7 @@ def make_check_tools(cfg: dict) -> dict[str, BaseTool]:
         measured after charging for duration_min minutes. Returns one record per check."""
         return [asdict(r) for r in check_thermal(temperature_c, duration_min, cfg)]
 
-    # check_efficiency_tool wraps evaluate_prediction (R6 if not validated, else R5)
+    # check_efficiency_tool wraps evaluate_prediction (R5; raises PredictionUnavailable if it cannot predict)
     return {t.name: t for t in (check_overcharge_tool, check_thermal_tool)}
 
 
@@ -128,7 +128,7 @@ def build_race_graph(*, model_factory=None, cfg=None):
     def thermal_node(state: RaceState) -> dict:      # all three rules always run (FR-2)
         return explained(state, run_tool("check_thermal_tool", state["inputs"]), 2)
 
-    def prediction_node(state: RaceState) -> dict:   # missing or invalid input -> R6 (fail closed)
+    def prediction_node(state: RaceState) -> dict:   # cannot predict -> PredictionUnavailable (no verdict)
         ...
 
     def decision_node(state: RaceState) -> dict:     # no LLM: compute_verdict + template_message + comment

@@ -17,7 +17,7 @@ Code must read these values from [spec/thresholds.yaml](spec/thresholds.yaml), w
 
 ## Model acceptance thresholds (XGBoost efficiency model)
 
-A trained model may only be used for stage 3 if it passes all three accuracy gates: tolerance accuracy and R² on the held-out test set, and 5-fold CV R² on the train split:
+A trained model may only be deployed for stage 3 if it passes all three accuracy gates: tolerance accuracy and R² on the held-out test set, and 5-fold CV R² on the train split:
 
 | ID | Metric | Passes when | Threshold |
 |----|--------|-------------|-----------|
@@ -38,7 +38,7 @@ gates_passed = (tolerance_accuracy > 80)
 
 No other metric can pass or fail the model.
 
-If any gate fails, stage 3 returns R6 `MODEL_NOT_VALIDATED` and the verdict is DO NOT PROCEED.
+The gates are checked when the model is trained (`uv run python -m formulatech.ml.train`), and the developer only deploys a model that passes. The app assumes the deployed model has passed them and does **not** check them at runtime; there is no `MODEL_NOT_VALIDATED` rule. If the model cannot produce a prediction at all (missing file, non-finite result), the check returns an error and **no verdict**, never CAN PROCEED.
 
 ## Rule logic
 
@@ -49,7 +49,7 @@ The checks answer two questions:
 
 1. **Check `OVERCHARGE` first.** If `I < 0 A` and `V > 4.2 V` → **DO NOT PROCEED**. Stop here and state failed check reason.
 2. **If overcharge is clean (pass), check `DTDT_MAX`, `D2TDT2_MAX` and `TCHEM_MAX`.** Evaluate all three. If any fails → **DO NOT PROCEED**, listing every failed check. Stop here.
-3. **If all three are clean, check the prediction against `EFFICIENCY_MIN`.** (The model must first pass its acceptance thresholds above; otherwise → **DO NOT PROCEED**.) The model predicts efficiency from the user's input from the UI. If `efficiency < EFFICIENCY_MIN` → **DO NOT PROCEED**. Stop here and state failed check reason.
+3. **If all three are clean, check the prediction against `EFFICIENCY_MIN`.** (The deployed model has already passed its acceptance thresholds at training time.) The model predicts efficiency from the user's input from the UI. If `efficiency < EFFICIENCY_MIN` → **DO NOT PROCEED**. Stop here and state failed check reason.
 4. **Otherwise → CAN PROCEED** into the race.
 
 ## Rules for working in this repo

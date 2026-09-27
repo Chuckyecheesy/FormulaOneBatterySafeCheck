@@ -202,7 +202,7 @@ def print_report(meta: dict) -> None:
     print(f"  Early stopping: best iteration {m['best_iteration']} of {m['n_estimators']}")
     print(f"\ngates_passed = {meta['gates_passed']}")
     if not meta["gates_passed"]:
-        print("Stage 3 will return MODEL_NOT_VALIDATED (DO NOT PROCEED) with this model.")
+        print("Do not deploy this model: it failed the acceptance gates (spec/03-ml-model.md §5).")
 
 
 if __name__ == "__main__":

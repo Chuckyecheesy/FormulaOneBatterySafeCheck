@@ -69,7 +69,7 @@ def thermal_quantities(temperature_c: float, duration_min: float, cfg: dict) -> 
     return {
         "t_s": t,
         "dT_dt": round(dT / t, COMPARE_DECIMALS),
-        "d2T_dt2": round(dT / t**2, COMPARE_DECIMALS),
+        "d2T_dt2": round(dT / t / t, COMPARE_DECIMALS),  # not dT / t**2: t**2 underflows to 0 for tiny t
         "T_chem": round(max(0.0, dT), COMPARE_DECIMALS),
     }
 

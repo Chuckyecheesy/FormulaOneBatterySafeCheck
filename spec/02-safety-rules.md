@@ -11,7 +11,6 @@ These rules tell you whether the battery is dangerous **right now**. All thresho
 | R3 | `HIGH_D2TDT2` | 2 | Heat is increasing at a very fast rate while the battery charges |
 | R4 | `HIGH_TCHEM` | 2 | Heat exposure to the surrounding environment is too high |
 | R5 | `LOW_EFFICIENCY` | 3 | Predicted efficiency is too low, so the car cannot proceed into the race (see [03-ml-model.md](03-ml-model.md)) |
-| R6 | `MODEL_NOT_VALIDATED` | 3 | Efficiency model not validated (see [03-ml-model.md](03-ml-model.md)) |
 
 ## Stage 1 — Overcharge check
 
@@ -74,7 +73,7 @@ Verdict: **DO NOT PROCEED**, with two reasons listed (R2 `HIGH_DTDT`, R4 `HIGH_T
 
 ## Check result record
 
-Every rule (R1–R6) returns the same record. The UI and the agents both use it:
+Every rule (R1–R5) returns the same record. The UI and the agents both use it:
 
 ```
 { rule, code, passed, recorded: {name: value, ...}, recorded_kind: "input" | "calculated",
@@ -97,7 +96,7 @@ def evaluate(V, I, T_t, minutes, cfg, model):
     # Stage 2 — evaluate all
     dT = T_t - cfg.thermal.initial_temp_c
     rate = round(dT / t, 9)
-    accel = round(dT / t**2, 9)            # d²T/dt² = ΔT / t²
+    accel = round(dT / t / t, 9)           # d²T/dt² = ΔT / t² (t² itself underflows to 0 for tiny t)
     tchem = round(max(0.0, dT), 9)
     if rate  > cfg.thermal.dT_dt_max_c_per_s:     failures.append(R2(rate))
     if accel > cfg.thermal.d2T_dt2_max_c_per_s2:  failures.append(R3(accel))
@@ -105,10 +104,8 @@ def evaluate(V, I, T_t, minutes, cfg, model):
     if failures:
         return Verdict.DO_NOT_PROCEED, failures
 
-    # Stage 3 — see 03-ml-model.md
-    if not model.gates_passed:
-        return Verdict.DO_NOT_PROCEED, [R6(model.metrics)]
-    eff = model.predict(V, I, T_t, minutes)
+    # Stage 3 — see 03-ml-model.md (gates were checked at training time)
+    eff = model.predict(V, I, T_t, minutes)   # no prediction -> error, no verdict (FR-4)
     if eff < cfg.efficiency.min_percent:
         return Verdict.DO_NOT_PROCEED, [R5(eff)]
 

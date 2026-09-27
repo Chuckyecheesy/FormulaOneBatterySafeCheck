@@ -7,7 +7,6 @@ Predict charging **efficiency (%)** from the operator's inputs. A prediction bel
 | Rule | Condition for FAIL | Reason text |
 |------|--------------------|-------------|
 | **R5** `LOW_EFFICIENCY` | `efficiency_pred < 70 %` | Predicted efficiency is too low, so the car cannot proceed into the race |
-| **R6** `MODEL_NOT_VALIDATED` | model failed any quality gate in §5 | Efficiency model not validated, so the race cannot be cleared |
 
 Message templates are in [05-ui.md](05-ui.md) §3.1.
 
@@ -88,7 +87,7 @@ gates_passed = (tolerance_accuracy > 80)
 Train R², the train − test R² gap and the early-stopping best iteration never affect `gates_passed`.
 
 - All gates pass → `gates_passed = true`, and the model may be deployed.
-- Any gate fails → `gates_passed = false`. The model can still be stored for analysis, but at runtime Stage 3 returns **R6** (fail closed, FR-4).
+- Any gate fails → `gates_passed = false`. The model can still be stored for analysis, but it must not be deployed. This is the developer's check at training time; the app does not re-check the gates at runtime (FR-4).
 
 ## 6. Inference
 

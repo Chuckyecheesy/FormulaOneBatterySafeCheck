@@ -38,7 +38,7 @@ The operator enters exactly five values:
 - **FR-1** Stage 1 (overcharge) runs first. If it fails, stop: Stages 2 and 3 do not run, and the verdict is `DO NOT PROCEED`.
 - **FR-2** Stage 2 (thermal) evaluates **all three** thermal rules, even after one fails, so that every failure is reported together.
 - **FR-3** Stage 3 (efficiency prediction) runs only if Stages 1 and 2 pass.
-- **FR-4** If the model has not passed its quality gates (see [03-ml-model.md](03-ml-model.md) §5), Stage 3 fails **closed**: the verdict is `DO NOT PROCEED`, with rule R6.
+- **FR-4** The model's quality gates ([03-ml-model.md](03-ml-model.md) §5) are checked at training time, and only a model that passes them is deployed. Stage 3 does not re-check them at runtime. If the model cannot produce a prediction (missing model file, non-finite result, missing input), the check returns an error and **no verdict**, never `CAN PROCEED`.
 - **FR-5** `CAN PROCEED` is returned only when every stage passes.
 - **FR-6** All thresholds are loaded from `thresholds.yaml`. No threshold appears as a literal in code or prompts.
 - **FR-7** Every check is logged with its inputs, calculated values, stage results, model version, and timestamp, so that each decision can be audited.

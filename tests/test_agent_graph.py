@@ -35,10 +35,8 @@ def _run(inputs, llm):
 
 @pytest.fixture
 def validated_model(monkeypatch):
-    """Model gates passed; the prediction is set per test."""
-    status = {"version": "test", "gates_passed": True, "tolerance_accuracy": 95.0, "r2": 0.95,
-              "r2_train": 0.99, "cv_mean": 0.95, "cv_std": 0.01}
-    monkeypatch.setattr(agents, "get_model_status", lambda: status)
+    """The deployed model (gates checked at training time); the prediction is set per test."""
+    monkeypatch.setattr(agents, "get_model_version", lambda: "test")
 
     def set_prediction(value):
         monkeypatch.setattr(agents, "predict_efficiency", lambda *a: value)
@@ -95,7 +93,8 @@ def test_ag3_every_failure_has_recorded_values_and_thresholds():
         assert failure["recorded"].keys() == failure["thresholds"].keys()
 
 
-def test_prompt_explains_tchem_as_rise_above_baseline():
+@pytest.mark.parametrize("t0", [None, 20.0])  # None: the value in thresholds.yaml
+def test_prompt_explains_tchem_as_rise_above_baseline(t0):
     seen = {}
 
     class CapturingModel:
@@ -114,12 +113,18 @@ def test_prompt_explains_tchem_as_rise_above_baseline():
         "thresholds": {"T_chem": "> 0.3"},
         "reason": "Heat exposure to the surrounding environment is too high",
     }
-    fallback = template_message(result, {"temperature_c": 26.0, "duration_min": 60}, load_thresholds())
+    cfg = load_thresholds()
+    if t0 is not None:
+        cfg = {**cfg, "thermal": {**cfg["thermal"], "initial_temp_c": t0}}
+    baseline = f'{cfg["thermal"]["initial_temp_c"]:g}'
+    fallback = template_message(result, {"temperature_c": 26.0, "duration_min": 60}, cfg)
 
-    explain(CapturingModel(), result, fallback)
+    explain(CapturingModel(), result, fallback, cfg)
 
-    assert "temperature rise above the 25°C baseline" in seen["prompt"]
-    assert "T_t - 25°C" in seen["prompt"]
+    assert f"temperature rise above the {baseline}°C baseline" in seen["prompt"]
+    assert f"T_t - {baseline}°C" in seen["prompt"]
+    if t0 is not None:  # the baseline comes from cfg, not a literal
+        assert "25°C" not in seen["prompt"]
 
 
 def test_summary_states_failed_check_reasons():
@@ -178,61 +183,47 @@ def test_s3_efficiency_boundary(validated_model, predicted, verdict):
         assert state["comment"] == agents.COMMENT_FIRE_RISK_IN_RACE
 
 
-def test_s3_4_model_not_validated(monkeypatch):
-    monkeypatch.setattr(agents, "get_model_status", lambda: {
-        "version": "test", "gates_passed": False, "tolerance_accuracy": 24.0, "r2": 0.76,
-        "r2_train": 0.84})
+def test_s3_4_runtime_ignores_model_gates(monkeypatch, tmp_path):
+    """Model gates are checked at training time, not at runtime: a failed-gate flag does not block."""
+    meta = tmp_path / "meta.json"
+    meta.write_text('{"version": "v1", "gates": {"gates_passed": false}}')
+    monkeypatch.setattr(agents, "META_PATH", meta)
+    monkeypatch.setattr(agents, "predict_efficiency", lambda *a: 98.0)
     state = _run(CLEAN, FakeChatModel())
 
-    assert state["verdict"] == "DO_NOT_PROCEED"
-    (failure,) = state["failures"]
-    assert failure["code"] == "MODEL_NOT_VALIDATED"
-    assert failure["recorded"]["r2"] == 0.76
+    assert state["verdict"] == "CAN_PROCEED"
+    assert state["stage_results"][-1]["model_version"] == "v1"
 
 
-def test_prediction_error_fails_closed(validated_model, monkeypatch):
+def test_prediction_error_gives_no_verdict(monkeypatch):
     def boom(*a):
         raise FileNotFoundError("no model")
 
     monkeypatch.setattr(agents, "predict_efficiency", boom)
-    state = _run(CLEAN, FakeChatModel())
-
-    assert state["verdict"] == "DO_NOT_PROCEED"
-    assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
+    with pytest.raises(agents.PredictionUnavailable):
+        _run(CLEAN, FakeChatModel())
 
 
 @pytest.mark.parametrize("prediction", [float("nan"), float("inf"), float("-inf")])
-def test_non_finite_prediction_fails_closed(validated_model, prediction):
+def test_non_finite_prediction_gives_no_verdict(validated_model, prediction):
     validated_model(prediction)
-    state = _run(CLEAN, FakeChatModel())
-
-    assert state["verdict"] == "DO_NOT_PROCEED"
-    (failure,) = state["failures"]
-    assert failure["code"] == "MODEL_NOT_VALIDATED"
+    with pytest.raises(agents.PredictionUnavailable):
+        _run(CLEAN, FakeChatModel())
 
 
-def test_missing_metadata_means_not_validated(monkeypatch, tmp_path):
-    monkeypatch.setattr(agents, "META_PATH", tmp_path / "missing.json")
-    monkeypatch.setattr(agents, "predict_efficiency", lambda *a: pytest.fail("must not predict"))
-    assert agents.get_model_status()["gates_passed"] is False
-
-    state = _run(CLEAN, FakeChatModel())
-    assert state["verdict"] == "DO_NOT_PROCEED"
-    assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
-
-
-@pytest.mark.parametrize("contents", ["{not json", "[]", '{"gates": null}'])
-def test_broken_metadata_fails_closed(monkeypatch, tmp_path, contents):
+@pytest.mark.parametrize("contents", [None, "{not json", "[]", '{"version": 7}'])
+def test_unreadable_metadata_only_loses_the_version(monkeypatch, tmp_path, contents):
     meta = tmp_path / "meta.json"
-    meta.write_text(contents)
+    if contents is not None:
+        meta.write_text(contents)
     monkeypatch.setattr(agents, "META_PATH", meta)
-    monkeypatch.setattr(agents, "predict_efficiency", lambda *a: pytest.fail("must not predict"))
+    monkeypatch.setattr(agents, "predict_efficiency", lambda *a: 65.0)
     state = _run(CLEAN, FakeChatModel())
 
     assert state["verdict"] == "DO_NOT_PROCEED"
     (failure,) = state["failures"]
-    assert failure["code"] == "MODEL_NOT_VALIDATED"
-    assert failure["reason"] == "Efficiency model not validated"
+    assert failure["code"] == "LOW_EFFICIENCY"
+    assert failure["model_version"] is None
 
 
 def test_predict_efficiency_passes_soc_to_model(monkeypatch, tmp_path):
@@ -258,14 +249,11 @@ def test_predict_efficiency_passes_soc_to_model(monkeypatch, tmp_path):
     assert not X.isna().any().any()
 
 
-def test_missing_soc_fails_closed(validated_model):
+def test_missing_soc_gives_no_verdict(validated_model):
     validated_model(98.0)
     inputs = {k: v for k, v in CLEAN.items() if k != "soc_percent"}
-    state = _run(inputs, FakeChatModel())
-
-    assert state["verdict"] == "DO_NOT_PROCEED"
-    (failure,) = state["failures"]
-    assert failure["code"] == "MODEL_NOT_VALIDATED"
+    with pytest.raises(agents.PredictionUnavailable):
+        _run(inputs, FakeChatModel())
 
 
 @pytest.mark.parametrize("inputs", [OVERCHARGED, HOT])  # stage 1, stage 2
@@ -288,16 +276,6 @@ def test_no_comment_on_can_proceed(validated_model):
 def test_comment_wording():
     assert agents.COMMENT_FIRE_RISK_NOW == "Your battery is at risk of fire hazard if you start the race now."
     assert agents.COMMENT_FIRE_RISK_IN_RACE == "Your battery is at risk of fire hazard during the middle of the race."
-
-
-def test_no_comment_when_model_not_validated(monkeypatch):
-    monkeypatch.setattr(agents, "get_model_status", lambda: {
-        "version": "test", "gates_passed": False, "tolerance_accuracy": 24.0, "r2": 0.76, "r2_train": 0.84})
-    state = _run(CLEAN, FakeChatModel())
-    assert state["verdict"] == "DO_NOT_PROCEED"
-    assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
-    assert state["comment"] == ""
-
 
 
 # ---- @tool wrappers (make_check_tools) ----

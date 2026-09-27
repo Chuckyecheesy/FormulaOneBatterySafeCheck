@@ -89,3 +89,13 @@ def test_thresholds_come_from_config(cfg):
 def test_non_positive_duration_rejected(cfg, minutes):
     with pytest.raises(ValueError):
         evaluate_stages_1_2(3.9, 0.5, 25.0, minutes, cfg)
+
+
+@pytest.mark.parametrize("minutes", [1e-200, 5e-324])
+def test_tiny_duration_rates_stay_defined(cfg, minutes):
+    """t² underflows to 0 for tiny t; the rates must still compare correctly, not divide by zero."""
+    hot = thermal_quantities(30.0, minutes, cfg)
+    assert hot["dT_dt"] > cfg["thermal"]["dT_dt_max_c_per_s"]
+    assert hot["d2T_dt2"] > cfg["thermal"]["d2T_dt2_max_c_per_s2"]
+    at_baseline = thermal_quantities(cfg["thermal"]["initial_temp_c"], minutes, cfg)
+    assert at_baseline["dT_dt"] == at_baseline["d2T_dt2"] == 0

@@ -33,9 +33,7 @@ def client():
 
 @pytest.fixture
 def validated_model(monkeypatch):
-    status = {"version": "test", "gates_passed": True, "tolerance_accuracy": 95.0, "r2": 0.95,
-              "r2_train": 0.99, "cv_mean": 0.95, "cv_std": 0.01}
-    monkeypatch.setattr(agents, "get_model_status", lambda: status)
+    monkeypatch.setattr(agents, "get_model_version", lambda: "test")
 
     def set_prediction(value):
         monkeypatch.setattr(agents, "predict_efficiency", lambda *a: value)
@@ -56,6 +54,7 @@ def validated_model(monkeypatch):
     ("soc_percent", True, "State of charge is required."),
     ("voltage_v", None, "Battery voltage is required."),
     ("voltage_v", [1], "Battery voltage must be a number."),
+    ("voltage_v", 10**400, "Battery voltage must be a finite number."),  # int too big for a float
     # just outside each limit
     ("voltage_v", 10.0001, "Battery voltage must be between 0 and 10."),
     ("voltage_v", -0.0001, "Battery voltage must be between 0 and 10."),
@@ -187,24 +186,37 @@ def test_low_efficiency_matches_e2e_fixture(client, validated_model):
     assert {k: body[k] for k in UI_FIELDS} == json.loads(LOW_EFFICIENCY_FIXTURE.read_text())
 
 
-def test_ui_hides_model_validation_failure(client, monkeypatch):
-    monkeypatch.setattr(agents, "get_model_status", lambda: {
-        "version": "test",
-        "gates_passed": False,
-        "tolerance_accuracy": 40.0,
-        "r2": 0.76,
-        "r2_train": 0.80,
-        "cv_mean": 0.74,
-        "cv_std": 0.02,
-    })
-    body = client.post("/api/check", json=CLEAN).json()
+def test_prediction_unavailable_returns_error_not_verdict(client, monkeypatch):
+    def boom(*a):
+        raise FileNotFoundError("no model")
 
-    assert body["verdict"] == "DO_NOT_PROCEED"
-    assert body["failures"] == []
-    assert body["summary"].startswith("DO NOT PROCEED")
+    monkeypatch.setattr(agents, "predict_efficiency", boom)
+    response = client.post("/api/check", json=CLEAN)
+
+    assert response.status_code == 503
+    assert response.json() == {"error": "The efficiency model could not produce a prediction"}
 
 
 def test_frontend_is_served(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "Race Readiness Check" in response.text
+
+
+@pytest.mark.parametrize("minutes", [1e-200, 5e-324])  # t² underflows to 0 for these
+def test_tiny_duration_does_not_crash(client, minutes):
+    hot = client.post("/api/check", json={**CLEAN, "duration_min": minutes, "temperature_c": 30.0})
+    assert hot.status_code == 200
+    assert hot.json()["verdict"] == "DO_NOT_PROCEED"
+    assert [s["status"] for s in hot.json()["stages"]] == ["passed", "failed", "skipped"]
+    at_baseline = client.post("/api/check", json={**CLEAN, "duration_min": minutes, "temperature_c": 25.0})
+    assert at_baseline.status_code == 200
+    assert at_baseline.json()["stages"][1]["status"] == "passed"  # no temperature rise, so no thermal failure
+
+
+def test_huge_integer_is_a_field_error(client):
+    response = client.post("/api/check", content='{"voltage_v": 1' + "0" * 400 + ', "current_a": 0.5, '
+                           '"temperature_c": 25, "duration_min": 60, "soc_percent": 50}',
+                           headers={"content-type": "application/json"})
+    assert response.status_code == 422
+    assert response.json() == {"errors": {"voltage_v": "Battery voltage must be a finite number."}}

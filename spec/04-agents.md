@@ -36,10 +36,10 @@ The four agents are nodes in a **LangGraph** `StateGraph`. Each node runs its de
 ### Agent 3 — Prediction Agent
 - **Job:** check the efficiency prediction result.
 - **Tools:**
-  - `get_model_status() → {version, gates_passed, tolerance_accuracy, r2, r2_train, cv_mean, cv_std}`
+  - `get_model_version() → version` (display only; the gates were checked at training time)
   - `predict_efficiency(voltage_v, current_a, temp_c, duration_min, soc_percent) → {efficiency_pct}`
-- **Logic (in tool code):** if `gates_passed = false`, return R6 without predicting. Otherwise predict and apply R5.
-- **Output:** the prediction, the model quality summary, and an explanation.
+- **Logic (in tool code):** predict and apply R5. If no prediction can be made, raise `PredictionUnavailable`: the API returns an error and no verdict (FR-4).
+- **Output:** the prediction and an explanation.
 
 ### Agent 4 — Race Decision Agent
 - **Job:** decide whether to proceed into the race, and write the final message.
@@ -58,7 +58,7 @@ The four agents are nodes in a **LangGraph** `StateGraph`. Each node runs its de
   }
   ```
 - `verdict` and `failures` are copied from `compute_verdict`, not written by the model.
-- `comment` is a fixed sentence chosen in code by the failed stage (05-ui.md §3.2), not written by the model. It is empty on CAN PROCEED and when the efficiency model is not validated (R6).
+- `comment` is a fixed sentence chosen in code by the failed stage (05-ui.md §3.2), not written by the model. It is empty on CAN PROCEED.
 
 ## 3. Implementation notes
 

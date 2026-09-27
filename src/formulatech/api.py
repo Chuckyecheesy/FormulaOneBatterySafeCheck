@@ -10,6 +10,7 @@ Every threshold shown on screen is read from spec/thresholds.yaml.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 from typing import Any
@@ -21,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from formulatech.agents import (
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_URL,
+    PredictionUnavailable,
     _fmt,
     _rate,
     _temp,
@@ -31,6 +33,7 @@ from formulatech.config import REPO_ROOT, load_thresholds
 from formulatech.rules import SECONDS_PER_MINUTE
 
 FRONTEND_DIR = REPO_ROOT / "frontend"
+logger = logging.getLogger(__name__)
 
 # Form field -> (input_limits key, label shown in errors).
 FIELDS = {
@@ -62,6 +65,9 @@ def validate_inputs(raw: dict[str, Any], cfg: dict) -> tuple[dict[str, float], d
             continue
         try:
             number = float(value)
+        except OverflowError:  # an integer too large for a float, e.g. 10**400
+            errors[name] = f"{label} must be a finite number."
+            continue
         except (TypeError, ValueError):
             errors[name] = f"{label} must be a number."
             continue
@@ -91,7 +97,7 @@ def _pct(value: float | None) -> str:
 def failure_card(failure: dict[str, Any], stage: int, cfg: dict) -> dict[str, Any]:
     """One card per failed rule: reason, recorded value(s), threshold(s) and stage."""
     rec = failure["recorded"]
-    th, oc, gates = cfg["thermal"], cfg["overcharge"], cfg["model_gates"]
+    th, oc = cfg["thermal"], cfg["overcharge"]
     threshold_label = "Fire hazard threshold"
     match failure["code"]:
         case "OVERCHARGED":
@@ -121,19 +127,6 @@ def failure_card(failure: dict[str, Any], stage: int, cfg: dict) -> dict[str, An
             ]
             threshold_label = "Required to pass"
             thresholds = [f"predicted efficiency ≥ {_fmt(cfg['efficiency']['min_percent'])} %"]
-        case "MODEL_NOT_VALIDATED":
-            reason = f"{failure['reason']}, so the race cannot be cleared"
-            recorded = [
-                f"tolerance accuracy = {_pct(rec.get('tolerance_accuracy'))}",
-                f"R² = {_rate(rec.get('r2'))}",
-                f"CV R² mean = {_rate(rec.get('cv_r2_mean'))}, std = {_rate(rec.get('cv_r2_std'))}",
-            ]
-            threshold_label = "Required to pass"
-            thresholds = [
-                f"tolerance accuracy > {_fmt(gates['tolerance_accuracy_min_percent'])} %",
-                f"R² > {_fmt(gates['r2_min'])}",
-                f"CV R² mean > {_fmt(gates['r2_min'])} and std ≤ {_fmt(gates['cv_r2_std_max'])}",
-            ]
         case _:
             reason, recorded, thresholds = failure["reason"], [], []
     return {
@@ -158,13 +151,9 @@ def stage_progress(stage_results: list[dict[str, Any]]) -> list[dict[str, str]]:
 
 
 def build_response(state: dict[str, Any], cfg: dict) -> dict[str, Any]:
-    """Shape the graph state for the UI.
-
-    The UI assumes the model has already been validated, so the internal fail-closed
-    MODEL_NOT_VALIDATED record is not surfaced as a normal user-facing card.
-    """
+    """Shape the graph state for the UI."""
     results = state["stage_results"]
-    failed = [r for r in results if not r["passed"] and r["code"] != "MODEL_NOT_VALIDATED"]
+    failed = [r for r in results if not r["passed"]]
     efficiency = next((r["recorded"]["efficiency_pct"] for r in results if r["code"] == "LOW_EFFICIENCY"), None)
     return {
         "verdict": state["verdict"],
@@ -207,7 +196,11 @@ def create_app(*, graph=None, cfg: dict | None = None) -> FastAPI:
         inputs, errors = validate_inputs(raw, cfg)
         if errors:
             return JSONResponse(status_code=422, content={"errors": errors})
-        final = run_race_assessment(inputs, graph=get_graph())
+        try:
+            final = run_race_assessment(inputs, graph=get_graph())
+        except PredictionUnavailable as exc:  # no prediction means no verdict, never a CAN PROCEED
+            logger.exception("Efficiency prediction unavailable")
+            return JSONResponse(status_code=503, content={"error": str(exc)})
         return build_response(final, cfg)
 
     if FRONTEND_DIR.is_dir():

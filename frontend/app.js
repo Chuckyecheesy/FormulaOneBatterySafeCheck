@@ -202,6 +202,12 @@ form.addEventListener("submit", async (event) => {
       for (const [name, message] of Object.entries(data.errors)) setFieldError(name, message);
       return;
     }
+    if (!response.ok && data.error) {
+      // No prediction means no verdict: show the reason, never a result.
+      progress.classList.add("hidden");
+      renderRequestError(`Could not run the check: ${data.error}.`);
+      return;
+    }
     if (!response.ok) throw new Error(`Server returned ${response.status}`);
     showStages(data.stages);
     renderResult(data);

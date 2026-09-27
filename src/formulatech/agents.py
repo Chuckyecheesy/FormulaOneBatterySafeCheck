@@ -42,7 +42,7 @@ class RaceState(TypedDict):
     verdict: str | None  # set only by the decision node, from compute_verdict
     failures: list[dict[str, Any]]
     summary: str
-    comment: str  # fixed risk comment for the failed stage (spec/05-ui.md §3.2); empty on CAN_PROCEED and R6
+    comment: str  # fixed risk comment for the failed stage (spec/05-ui.md §3.2); empty on CAN_PROCEED
 
 
 # Fixed comments, by failed stage (spec/05-ui.md §3.2). Stages 1–2: fire hazard now; stage 3 (R5 only): during the race.
@@ -69,7 +69,7 @@ def _temp(value: float) -> str:
 
 def template_message(result: dict[str, Any], inputs: dict[str, float], cfg: dict) -> str:
     """Plain-language message for a failed check, used as the fallback and in the summary."""
-    rec, th, gates = result["recorded"], cfg["thermal"], cfg["model_gates"]
+    rec, th = result["recorded"], cfg["thermal"]
     match result["code"]:
         case "OVERCHARGED":
             oc = cfg["overcharge"]
@@ -103,13 +103,6 @@ def template_message(result: dict[str, Any], inputs: dict[str, float], cfg: dict
                 f"(XGBoost model v{result.get('model_version')}). "
                 f"Required to pass: ≥ {_fmt(cfg['efficiency']['min_percent'])} %."
             )
-        case "MODEL_NOT_VALIDATED":
-            return (
-                f"Efficiency model not validated, so the race cannot be cleared. "
-                f"Tolerance accuracy: {_rate(rec['tolerance_accuracy'])} % "
-                f"(needs > {_fmt(gates['tolerance_accuracy_min_percent'])} %), "
-                f"R²: {_rate(rec['r2'])} (needs > {_fmt(gates['r2_min'])})."
-            )
     return f"{result['reason']}."
 
 
@@ -128,17 +121,21 @@ def _default_model_factory(model_name: str, base_url: str) -> ChatOllama:
     )
 
 
-def explain(llm: Any, result: dict[str, Any], fallback: str) -> str:
-    """Ask the LLM to explain a computed result. Fall back to the template on any error (NFR-2)."""
+def explain(llm: Any, result: dict[str, Any], fallback: str, cfg: dict) -> str:
+    """Ask the LLM to explain a computed result. Fall back to the template on any error (NFR-2).
+
+    The thermal baseline in the prompt is read from cfg, never hard-coded (spec/04-agents.md §3.4).
+    """
     if llm is None:
         return fallback
     payload = {k: v for k, v in result.items() if k not in {"rule", "code", "stage"}}
+    t0 = _fmt(cfg["thermal"]["initial_temp_c"])
     prompt = (
         "Explain this battery safety check result to a race engineer in one or two sentences. "
         "Do not change the result. Include the recorded value(s) and threshold(s). "
         "Do not mention rule IDs or reason codes. "
-        "For T_chem, treat it as the temperature rise above the 25°C baseline, not the absolute battery temperature. "
-        "In other words, T_chem = max(0, T_t - 25°C).\n"
+        f"For T_chem, treat it as the temperature rise above the {t0}°C baseline, not the absolute battery temperature. "
+        f"In other words, T_chem = max(0, T_t - {t0}°C).\n"
         f"RESULT_JSON={json.dumps(payload, default=str)}"
     )
     try:
@@ -160,32 +157,22 @@ def _claims_proceed(text: str) -> bool:
 # ---------------------------------------------------------------------------
 # Deterministic stage 3 tools
 # ---------------------------------------------------------------------------
+# The model's acceptance gates (spec/03-ml-model.md §5) are checked when it is trained
+# (`python -m formulatech.ml.train`), not here: the deployed model is assumed to have passed them.
 
 
-# Model status when the metadata is missing or unreadable: the model counts as not validated.
-_UNVALIDATED_STATUS = {"version": None, "gates_passed": False, "tolerance_accuracy": None, "r2": None,
-                       "r2_train": None, "cv_mean": None, "cv_std": None}
+class PredictionUnavailable(RuntimeError):
+    """Stage 3 could not produce a prediction. There is no verdict: never a CAN PROCEED."""
 
 
-def get_model_status() -> dict[str, Any]:
-    """Read the saved metadata from the trained model. Missing metadata means not validated."""
-    if not META_PATH.exists():
-        return dict(_UNVALIDATED_STATUS)
-
-    with META_PATH.open() as fh:
-        meta = json.load(fh)
-
-    metrics = meta.get("metrics", {})
-    gates = meta.get("gates", {})
-    return {
-        "version": meta.get("version"),
-        "gates_passed": bool(gates.get("gates_passed", False)),
-        "tolerance_accuracy": metrics.get("tolerance_accuracy"),
-        "r2": metrics.get("r2_test"),
-        "r2_train": metrics.get("r2_train"),
-        "cv_mean": metrics.get("cv_r2_mean"),
-        "cv_std": metrics.get("cv_r2_std"),
-    }
+def get_model_version() -> str | None:
+    """Version of the deployed model, from its saved metadata. Display only; None if unreadable."""
+    try:
+        with META_PATH.open() as fh:
+            version = json.load(fh).get("version")
+    except Exception:
+        return None
+    return version if isinstance(version, str) else None
 
 
 def predict_efficiency(
@@ -210,48 +197,15 @@ def predict_efficiency(
     return float(model.predict(X)[0])
 
 
-def _model_not_validated(status: dict[str, Any], cfg: dict, reason: str) -> dict[str, Any]:
-    """R6 record. Stage 3 fails closed (FR-4)."""
-    g = cfg["model_gates"]
-    return {
-        "rule": "R6",
-        "code": "MODEL_NOT_VALIDATED",
-        "passed": False,
-        "recorded": {
-            "tolerance_accuracy": status.get("tolerance_accuracy"),
-            "r2": status.get("r2"),
-            "cv_r2_mean": status.get("cv_mean"),
-            "cv_r2_std": status.get("cv_std"),
-        },
-        "recorded_kind": "calculated",
-        "thresholds": {
-            "tolerance_accuracy": f"> {_fmt(g['tolerance_accuracy_min_percent'])}",
-            "r2": f"> {_fmt(g['r2_min'])}",
-            "cv_r2_mean": f"> {_fmt(g['r2_min'])}",
-            "cv_r2_std": f"≤ {_fmt(g['cv_r2_std_max'])}",
-        },
-        "unit": {"tolerance_accuracy": "%", "r2": "", "cv_r2_mean": "", "cv_r2_std": ""},
-        "reason": reason,
-    }
-
-
 def evaluate_prediction(inputs: dict[str, float], cfg: dict) -> dict[str, Any]:
-    """R5/R6 in code: R6 if the model is not validated or cannot predict, else R5 with strict `<`."""
-    try:
-        status = get_model_status()
-    except Exception:  # corrupt or malformed metadata: fail closed, never a false CAN PROCEED
-        logger.exception("Could not read the efficiency model metadata")
-        return _model_not_validated(_UNVALIDATED_STATUS, cfg, "Efficiency model not validated")
-    if not status["gates_passed"]:
-        return _model_not_validated(status, cfg, "Efficiency model not validated")
+    """R5 in code, strict `<`. Raises PredictionUnavailable if the model cannot predict."""
     try:
         raw = predict_efficiency(inputs["voltage_v"], inputs["current_a"], inputs["temperature_c"],
                                  inputs["duration_min"], inputs["soc_percent"])
-    except Exception:
-        logger.exception("Efficiency prediction failed")
-        return _model_not_validated(status, cfg, "Efficiency model could not produce a prediction")
+    except Exception as exc:
+        raise PredictionUnavailable("The efficiency model could not produce a prediction") from exc
     if not math.isfinite(raw):
-        return _model_not_validated(status, cfg, "Efficiency model could not produce a prediction")
+        raise PredictionUnavailable("The efficiency model could not produce a prediction")
 
     eff = round(raw, COMPARE_DECIMALS)
     min_pct = cfg["efficiency"]["min_percent"]
@@ -264,7 +218,7 @@ def evaluate_prediction(inputs: dict[str, float], cfg: dict) -> dict[str, Any]:
         "thresholds": {"efficiency_pct": f"< {_fmt(min_pct)}"},
         "unit": {"efficiency_pct": "%"},
         "reason": "Predicted efficiency is too low, so the car cannot proceed into the race",
-        "model_version": status["version"],
+        "model_version": get_model_version(),
     }
 
 
@@ -315,8 +269,8 @@ def make_check_tools(cfg: dict) -> dict[str, BaseTool]:
     def check_efficiency_tool(
         voltage_v: float, current_a: float, temperature_c: float, duration_min: float, soc_percent: float
     ) -> list[dict]:
-        """Check the efficiency model's quality gates, then predict efficiency (%) for the reading
-        and compare it with the minimum. Returns one record: model not validated, or the prediction."""
+        """Predict efficiency (%) for the reading with the deployed XGBoost model and compare it
+        with the minimum. Returns one check result record."""
         inputs = {"voltage_v": voltage_v, "current_a": current_a, "temperature_c": temperature_c,
                   "duration_min": duration_min, "soc_percent": soc_percent}
         return [evaluate_prediction(inputs, cfg)]
@@ -349,7 +303,7 @@ def build_race_graph(
     def explained(state: RaceState, results: list[dict[str, Any]], stage: int) -> dict:
         """Partial update: append results; explain only the failures (nothing to explain on a pass)."""
         results = [{**r, "stage": stage} for r in results]
-        new = [explain(llm, r, template_message(r, state["inputs"], cfg)) for r in results if not r["passed"]]
+        new = [explain(llm, r, template_message(r, state["inputs"], cfg), cfg) for r in results if not r["passed"]]
         return {"stage_results": state["stage_results"] + results, "explanations": state["explanations"] + new}
 
     def run_tool(name: str, inputs: dict[str, float]) -> list[dict[str, Any]]:
@@ -369,9 +323,10 @@ def build_race_graph(
     def prediction_node(state: RaceState) -> dict:
         try:
             results = run_tool("check_efficiency_tool", state["inputs"])
-        except Exception:  # missing or invalid input: fail closed (FR-4)
-            logger.exception("Efficiency check could not run")
-            results = [_model_not_validated(_UNVALIDATED_STATUS, cfg, "Efficiency model could not produce a prediction")]
+        except PredictionUnavailable:
+            raise
+        except Exception as exc:  # missing or invalid input: no prediction, so no verdict
+            raise PredictionUnavailable("The efficiency model could not produce a prediction") from exc
         return explained(state, results, 3)
 
     # Agent 4: Race Decision; no LLM for verdict, failures, summary or comment
@@ -382,9 +337,7 @@ def build_race_graph(
             comment = ""
         else:  # state every failed check reason
             failed_codes = {r["code"] for r in result["failures"]}
-            if "MODEL_NOT_VALIDATED" in failed_codes:  # nothing was predicted, so no fire-risk claim
-                comment = ""
-            elif "LOW_EFFICIENCY" in failed_codes:
+            if "LOW_EFFICIENCY" in failed_codes:
                 comment = COMMENT_FIRE_RISK_IN_RACE
             else:
                 comment = COMMENT_FIRE_RISK_NOW
