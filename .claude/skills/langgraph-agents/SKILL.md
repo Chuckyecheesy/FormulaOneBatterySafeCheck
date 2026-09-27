@@ -62,7 +62,7 @@ llm = ChatOllama(
 This is the pattern in [src/formulatech/agents.py](../../../src/formulatech/agents.py) and [spec/04-agents.md](../../../spec/04-agents.md) §3.3. One `StateGraph` with one node per agent. Each stage's deterministic check is wrapped as a `@tool` by `make_check_tools(cfg)`, but **the node invokes the tool in code**, with the arguments taken from `state["inputs"]`. There is no agent loop and the LLM never calls a pipeline tool. Every node follows two steps:
 
 1. **Run the tool in code** and append its records (tagged with `stage`) to `stage_results`.
-2. **Explain only the failures.** `explain(llm, result, fallback)` makes one `llm.invoke(prompt)` call per failed record, with the record as JSON in the prompt. On any error, timeout or empty reply it returns the §3.1 `template_message`. A stage that passed makes no LLM call.
+2. **Explain only the failures.** `explain(llm, result, fallback, cfg)` makes one `llm.invoke(prompt)` call per failed record, with the record as JSON in the prompt and the thermal baseline read from `cfg`. On any error, timeout or empty reply it returns the §3.1 `template_message`. A stage that passed makes no LLM call.
 
 The Race Decision node has no LLM: `verdict` and `failures` come from `compute_verdict`, `summary` from `template_message` (every failed check reason), and `comment` is the fixed §3.2 sentence chosen by the failed stage. If an explanation claims the car can proceed on a DO NOT PROCEED verdict, the node logs the mismatch and the computed verdict stands.
 
@@ -119,7 +119,7 @@ def build_race_graph(*, model_factory=None, cfg=None):
 
     def explained(state: RaceState, results: list[dict[str, Any]], stage: int) -> dict:
         results = [{**r, "stage": stage} for r in results]
-        new = [explain(llm, r, template_message(r, state["inputs"], cfg)) for r in results if not r["passed"]]
+        new = [explain(llm, r, template_message(r, state["inputs"], cfg), cfg) for r in results if not r["passed"]]
         return {"stage_results": state["stage_results"] + results, "explanations": state["explanations"] + new}
 
     def overcharge_node(state: RaceState) -> dict:
@@ -154,7 +154,7 @@ def build_race_graph(*, model_factory=None, cfg=None):
     return graph.compile()
 ```
 
-Nodes return **partial updates** (a dict with only the keys they change). LangGraph merges them into the state. See `agents.py` for the full `explain`, `prediction_node` and `decision_node`. Run it with `run_race_assessment(inputs)`. At most one LLM call per failed record, so NFR-1 holds with `num_predict` about 150.
+Nodes return **partial updates** (a dict with only the keys they change). LangGraph merges them into the state. See `agents.py` for the full `explain`, `prediction_node` and `decision_node`. Run it with `run_race_assessment(inputs)`, not `graph.invoke`: it also writes the FR-7 audit record (`formulatech.audit`), including for a check that ends without a verdict. At most one LLM call per failed record, so NFR-1 holds with `num_predict` about 150.
 
 ### 4. Template B: a follow-up Q&A agent (never for the verdict)
 Use this for an extra, optional agent outside the check pipeline. For example, an engineer asks "why did this fail?" after the verdict is shown. The tools must be **read-only wrappers around deterministic code**. The answer is display text and must never change `verdict` or `failures`.
