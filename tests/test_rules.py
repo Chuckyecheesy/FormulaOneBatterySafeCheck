@@ -46,6 +46,8 @@ def test_stage1(cfg, case, V, I, r1_fails):
         ("S2-4", 30.0, 1, {"HIGH_DTDT", "HIGH_D2TDT2", "HIGH_TCHEM"}),
         ("S2-5", 20.0, 60, set()),  # cooler than T0
         ("S2-6", 25.2, 0.1, {"HIGH_DTDT", "HIGH_D2TDT2"}),
+        # A single thermal failure is enough to stop (issue #3): R3 alone, t = 15 s
+        ("S2-7", 25.3, 0.25, {"HIGH_D2TDT2"}),
     ],
 )
 def test_stage2(cfg, case, T, minutes, failed_codes):

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Race Readiness Check — FormulaTech</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Race Readiness Check</h1>
+      <p class="subtitle">Pre-race battery safety check</p>
+    </header>
+
+    <form id="check-form" class="card" novalidate>
+      <div class="field">
+        <label for="voltage_v">Battery voltage</label>
+        <div class="input-row">
+          <input id="voltage_v" name="voltage_v" type="number" step="any" inputmode="decimal" placeholder="4.10" required>
+          <span class="unit">V</span>
+        </div>
+        <p class="error" id="voltage_v-error" role="alert"></p>
+      </div>
+
+      <div class="field">
+        <label for="current_a">Battery current</label>
+        <div class="input-row">
+          <input id="current_a" name="current_a" type="number" step="any" inputmode="decimal" placeholder="0.5" required>
+          <span class="unit">A</span>
+        </div>
+        <p class="error" id="current_a-error" role="alert"></p>
+      </div>
+
+      <div class="field">
+        <label for="temperature_c">Battery temperature</label>
+        <div class="input-row">
+          <input id="temperature_c" name="temperature_c" type="number" step="any" inputmode="decimal" placeholder="25" required>
+          <span class="unit">°C</span>
+        </div>
+        <p class="error" id="temperature_c-error" role="alert"></p>
+      </div>
+
+      <div class="field">
+        <label for="duration_min">Charging duration</label>
+        <div class="input-row">
+          <input id="duration_min" name="duration_min" type="number" step="any" min="0" inputmode="decimal" placeholder="60" required>
+          <span class="unit">min</span>
+        </div>
+        <p class="hint" id="duration-hint">= — s</p>
+        <p class="error" id="duration_min-error" role="alert"></p>
+      </div>
+
+      <div class="field">
+        <label for="soc_percent">State of charge</label>
+        <div class="input-row">
+          <input id="soc_percent" name="soc_percent" type="number" step="any" min="0" max="100" inputmode="decimal" placeholder="50" required>
+          <span class="unit">%</span>
+        </div>
+        <p class="error" id="soc_percent-error" role="alert"></p>
+      </div>
+
+      <button id="submit" type="submit" disabled>Submit</button>
+    </form>
+
+    <section id="progress" class="card hidden" aria-live="polite">
+      <div class="spinner-row">
+        <span class="spinner" id="spinner" aria-hidden="true"></span>
+        <span id="progress-label">Running safety checks…</span>
+      </div>
+      <ol class="stages" id="stages">
+        <li data-stage="1">Overcharge</li>
+        <li data-stage="2">Thermal</li>
+        <li data-stage="3">Prediction</li>
+      </ol>
+    </section>
+
+    <section id="result" class="hidden" aria-live="polite"></section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
