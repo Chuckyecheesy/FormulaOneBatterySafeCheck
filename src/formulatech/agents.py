@@ -41,6 +41,12 @@ class RaceState(TypedDict):
     verdict: str | None  # set only by the decision node, from compute_verdict
     failures: list[dict[str, Any]]
     summary: str
+    comment: str  # fixed risk comment for the failed stage (spec/05-ui.md §3.2); empty on CAN_PROCEED and R6
+
+
+# Fixed comments, by failed stage (spec/05-ui.md §3.2). Stages 1–2: fire hazard now; stage 3 (R5 only): during the race.
+COMMENT_FIRE_RISK_NOW = "Your battery is at risk of fire hazard if you start the race now."
+COMMENT_FIRE_RISK_IN_RACE = "Your battery is at risk of fire hazard during the middle of the race."
 
 
 # ---------------------------------------------------------------------------
@@ -63,35 +69,31 @@ def _temp(value: float) -> str:
 def template_message(result: dict[str, Any], inputs: dict[str, float], cfg: dict) -> str:
     """Plain-language message for a failed check, used as the fallback and in the summary."""
     rec, th, gates = result["recorded"], cfg["thermal"], cfg["model_gates"]
-    t0 = _fmt(th["initial_temp_c"])
-    t_c = _temp(inputs["temperature_c"])
     match result["code"]:
         case "OVERCHARGED":
             oc = cfg["overcharge"]
             return (
                 f"Battery already overcharged. Battery voltage: {_fmt(rec['V'])} V, "
-                f"battery current: {_fmt(rec['I'])} A. Battery voltage hazard threshold: "
-                f"> {_fmt(oc['voltage_max_v'])} V. Battery current hazard threshold: "
+                f"battery current: {_fmt(rec['I'])} A. Battery voltage fire hazard threshold: "
+                f"> {_fmt(oc['voltage_max_v'])} V. Battery current fire hazard threshold: "
                 f"< {_fmt(oc['current_max_a'])} A. (Unsafe when both are true.)"
             )
         case "HIGH_DTDT":
-            t_s = _fmt(inputs["duration_min"] * 60)
             return (
-                f"Thermal stress from battery charging is at high risk. dT/dt: {_rate(rec['dT_dt'])} °C/s "
-                f"(calculated from T = {t_c} °C, T0 = {t0} °C, t = {t_s} s). "
-                f"Hazard threshold: > {_fmt(th['dT_dt_max_c_per_s'])} °C/s."
+                f"Thermal stress from battery charging is at high risk. dT/dt: {_rate(rec['dT_dt'])} °C/s. "
+                f"Fire hazard threshold: > {_fmt(th['dT_dt_max_c_per_s'])} °C/s."
             )
         case "HIGH_D2TDT2":
             return (
                 f"Heat is increasing at a very fast rate while the battery charges. "
                 f"d²T/dt²: {_rate(rec['d2T_dt2'])} °C/s². "
-                f"Hazard threshold: > {_fmt(th['d2T_dt2_max_c_per_s2'])} °C/s²."
+                f"Fire hazard threshold: > {_fmt(th['d2T_dt2_max_c_per_s2'])} °C/s²."
             )
         case "HIGH_TCHEM":
             return (
                 f"Heat exposure to the surrounding environment is too high. "
-                f"T_chem: {_temp(rec['T_chem'])} °C (= max(0, {t_c} − {t0})). "
-                f"Hazard threshold: > {_fmt(th['t_chem_max_c'])} °C."
+                f"T_chem: {_temp(rec['T_chem'])} °C. "
+                f"Fire hazard threshold: > {_fmt(th['t_chem_max_c'])} °C."
             )
         case "LOW_EFFICIENCY":
             return (
@@ -314,19 +316,27 @@ def build_race_graph(
     def prediction_node(state: RaceState) -> dict:
         return explained(state, [evaluate_prediction(state["inputs"], cfg)], 3)
 
-    # Agent 4: Race Decision; no LLM for verdict, failures or summary
+    # Agent 4: Race Decision; no LLM for verdict, failures, summary or comment
     def decision_node(state: RaceState) -> dict:
         result = compute_verdict(state["stage_results"])
         if result["verdict"] == "CAN_PROCEED":
             summary = "CAN PROCEED into the race."
+            comment = ""
         else:  # state every failed check reason
+            failed_codes = {r["code"] for r in result["failures"]}
+            if "MODEL_NOT_VALIDATED" in failed_codes:  # nothing was predicted, so no fire-risk claim
+                comment = ""
+            elif "LOW_EFFICIENCY" in failed_codes:
+                comment = COMMENT_FIRE_RISK_IN_RACE
+            else:
+                comment = COMMENT_FIRE_RISK_NOW
             summary = "DO NOT PROCEED. " + " ".join(
                 template_message(f, state["inputs"], cfg) for f in result["failures"]
             )
             for text in state["explanations"]:
                 if _claims_proceed(text):
                     logger.warning("LLM explanation contradicts computed verdict %s: %r", result["verdict"], text)
-        return {**result, "summary": summary}
+        return {**result, "summary": summary, "comment": comment}
 
     # Routing reads stage_results, never LLM output
     def route_after_overcharge(state: RaceState) -> str:
@@ -359,4 +369,5 @@ def run_race_assessment(inputs: dict[str, float], *, graph=None) -> RaceState:
         "verdict": None,
         "failures": [],
         "summary": "",
+        "comment": "",
     })

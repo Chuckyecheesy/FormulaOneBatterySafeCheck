@@ -58,6 +58,7 @@ The four agents are nodes in a **LangGraph** `StateGraph`. Each node runs its de
   }
   ```
 - `verdict` and `failures` are copied from `compute_verdict`, not written by the model.
+- `comment` is a fixed sentence chosen in code by the failed stage (05-ui.md §3.2), not written by the model. It is empty on CAN PROCEED and when the efficiency model is not validated (R6).
 
 ## 3. Implementation notes
 
@@ -78,6 +79,7 @@ class CheckState(TypedDict):
     verdict: str | None       # set only by Agent 4, from compute_verdict
     failures: list[dict]
     summary: str
+    comment: str              # fixed risk comment for the failed stage (05-ui.md §3.2), set by Agent 4
 ```
 
 ### 3.3 Node pattern

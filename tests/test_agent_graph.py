@@ -99,7 +99,8 @@ def test_summary_states_failed_check_reasons():
     state = _run(HOT, FakeChatModel())
 
     assert "dT/dt: 0.08333 °C/s" in state["summary"]
-    assert "Hazard threshold: > 0.03 °C/s." in state["summary"]
+    assert "Fire hazard threshold: > 0.03 °C/s." in state["summary"]
+    assert "max(0" not in state["summary"] and "calculated from" not in state["summary"]
     assert "T_chem: 5.00 °C" in state["summary"]
 
 
@@ -183,3 +184,35 @@ def test_missing_soc_fails_closed(validated_model):
     assert state["verdict"] == "DO_NOT_PROCEED"
     (failure,) = state["failures"]
     assert failure["code"] == "MODEL_NOT_VALIDATED"
+
+
+@pytest.mark.parametrize("inputs", [OVERCHARGED, HOT])  # stage 1, stage 2
+def test_comment_fire_risk_now(inputs):
+    assert _run(inputs, FakeChatModel())["comment"] == agents.COMMENT_FIRE_RISK_NOW
+
+
+def test_comment_fire_risk_during_race(validated_model):
+    validated_model(65.0)
+    assert _run(CLEAN, FakeChatModel())["comment"] == agents.COMMENT_FIRE_RISK_IN_RACE
+
+
+def test_no_comment_on_can_proceed(validated_model):
+    validated_model(98.0)
+    state = _run(CLEAN, FakeChatModel())
+    assert state["verdict"] == "CAN_PROCEED"
+    assert state["comment"] == ""
+
+
+def test_comment_wording():
+    assert agents.COMMENT_FIRE_RISK_NOW == "Your battery is at risk of fire hazard if you start the race now."
+    assert agents.COMMENT_FIRE_RISK_IN_RACE == "Your battery is at risk of fire hazard during the middle of the race."
+
+
+def test_no_comment_when_model_not_validated(monkeypatch):
+    monkeypatch.setattr(agents, "get_model_status", lambda: {
+        "version": "test", "gates_passed": False, "tolerance_accuracy": 24.0, "r2": 0.76, "r2_train": 0.84})
+    state = _run(CLEAN, FakeChatModel())
+    assert state["verdict"] == "DO_NOT_PROCEED"
+    assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
+    assert state["comment"] == ""
+
