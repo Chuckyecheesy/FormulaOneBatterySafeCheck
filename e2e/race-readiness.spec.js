@@ -1,4 +1,6 @@
 const { test, expect } = require("@playwright/test");
+// Backend response for a 65 % prediction. tests/test_api.py checks it still matches the real API.
+const LOW_EFFICIENCY_RESPONSE = require("./fixtures/low-efficiency-response.json");
 
 const CLEAN = {
   voltage_v: "4.10",
@@ -132,4 +134,40 @@ test("a clean reading can proceed", async ({ page }) => {
   await expect(page.locator("#stages [data-stage='1']")).toHaveClass("passed");
   await expect(page.locator("#stages [data-stage='2']")).toHaveClass("passed");
   await expect(page.locator("#stages [data-stage='3']")).toHaveClass("passed");
+});
+
+test("a predicted efficiency below 70 % does not proceed", async ({ page }) => {
+  // The trained model never predicts below 70 % on this dataset, so serve the backend's
+  // response for a 65 % prediction and check that the page renders it correctly.
+  let sent = null;
+  await page.route("**/api/check", async (route) => {
+    sent = route.request().postDataJSON();
+    await route.fulfill({ json: LOW_EFFICIENCY_RESPONSE });
+  });
+
+  await fillReading(page, {});
+  await page.locator("#submit").click();
+
+  const popup = page.locator("#fail-popup");
+  await expect(popup).toBeVisible();
+  await expect(popup.getByRole("heading", { name: "DO NOT PROCEED" })).toBeVisible();
+  await expect(popup.getByText("Stage 3: Prediction")).toBeVisible();
+  await expect(popup.getByText("Predicted efficiency is too low, so the car cannot proceed into the race")).toBeVisible();
+  await expect(popup.getByText("Recorded (calculated):")).toBeVisible();
+  await expect(popup.getByText("predicted efficiency = 65.00 % (XGBoost model vtest)")).toBeVisible();
+  await expect(popup.getByText("Required to pass:")).toBeVisible();
+  await expect(popup.getByText("predicted efficiency ≥ 70 %")).toBeVisible();
+  await expect(popup.getByText("Your battery is at risk of fire hazard during the middle of the race.")).toBeVisible();
+  await expect(popup.getByText("if you start the race now")).toHaveCount(0);
+  await expect(popup.getByText(/\bR5\b|LOW_EFFICIENCY/)).toHaveCount(0);
+
+  expect(sent).toEqual({ voltage_v: 4.1, current_a: 0.5, temperature_c: 25, duration_min: 60, soc_percent: 50 });
+
+  await page.locator("#fail-popup-close").click();
+  const result = page.locator("#result");
+  await expect(result.getByText("DO NOT PROCEED")).toBeVisible();
+  await expect(result.getByText("CAN PROCEED", { exact: true })).toHaveCount(0);
+  await expect(page.locator("#stages [data-stage='1']")).toHaveClass("passed");
+  await expect(page.locator("#stages [data-stage='2']")).toHaveClass("passed");
+  await expect(page.locator("#stages [data-stage='3']")).toHaveClass("failed");
 });

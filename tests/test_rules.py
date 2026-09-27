@@ -48,6 +48,17 @@ def test_stage1(cfg, case, V, I, r1_fails):
         ("S2-6", 25.2, 0.1, {"HIGH_DTDT", "HIGH_D2TDT2"}),
         # A single thermal failure is enough to stop (issue #3): R3 alone, t = 15 s
         ("S2-7", 25.3, 0.25, {"HIGH_D2TDT2"}),
+        # Exactly at a threshold passes (strict >). 26.8 °C over 1 min: dT/dt = 0.03 and
+        # d²T/dt² = 0.0005, both pass; T_chem = 1.8 must fail (a rise this large always exceeds 0.3)
+        ("S2-8", 26.8, 1, {"HIGH_TCHEM"}),
+        # Just above the dT/dt and d²T/dt² thresholds
+        ("S2-9", 26.81, 1, {"HIGH_DTDT", "HIGH_D2TDT2", "HIGH_TCHEM"}),
+        # Rounding to 9 decimals: T_chem 0.3000000004 rounds to 0.3 and passes; 0.3000000006 does not
+        ("S2-10", 25.3000000004, 60, set()),
+        ("S2-11", 25.3000000006, 60, {"HIGH_TCHEM"}),
+        # d²T/dt² on its own: 25.288 °C over 24 s gives exactly 0.0005 (passes); 25.2881 °C fails R3 only
+        ("S2-12", 25.288, 0.4, set()),
+        ("S2-13", 25.2881, 0.4, {"HIGH_D2TDT2"}),
     ],
 )
 def test_stage2(cfg, case, T, minutes, failed_codes):

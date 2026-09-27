@@ -157,6 +157,27 @@ def test_s3_3_exactly_at_threshold_passes(validated_model):
     assert _run(CLEAN, FakeChatModel())["verdict"] == "CAN_PROCEED"
 
 
+@pytest.mark.parametrize(
+    "predicted, verdict",
+    [
+        (69.99, "DO_NOT_PROCEED"),
+        (69.999999999, "DO_NOT_PROCEED"),  # below 70 after rounding to 9 decimals
+        (69.9999999996, "CAN_PROCEED"),  # rounds to 70.0, which passes (strict <)
+        (70.000000001, "CAN_PROCEED"),
+        (0.0, "DO_NOT_PROCEED"),
+    ],
+)
+def test_s3_efficiency_boundary(validated_model, predicted, verdict):
+    validated_model(predicted)
+    state = _run(CLEAN, FakeChatModel())
+
+    assert state["verdict"] == verdict
+    if verdict == "DO_NOT_PROCEED":
+        (failure,) = state["failures"]
+        assert failure["code"] == "LOW_EFFICIENCY"
+        assert state["comment"] == agents.COMMENT_FIRE_RISK_IN_RACE
+
+
 def test_s3_4_model_not_validated(monkeypatch):
     monkeypatch.setattr(agents, "get_model_status", lambda: {
         "version": "test", "gates_passed": False, "tolerance_accuracy": 24.0, "r2": 0.76,
@@ -178,6 +199,40 @@ def test_prediction_error_fails_closed(validated_model, monkeypatch):
 
     assert state["verdict"] == "DO_NOT_PROCEED"
     assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
+
+
+@pytest.mark.parametrize("prediction", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_prediction_fails_closed(validated_model, prediction):
+    validated_model(prediction)
+    state = _run(CLEAN, FakeChatModel())
+
+    assert state["verdict"] == "DO_NOT_PROCEED"
+    (failure,) = state["failures"]
+    assert failure["code"] == "MODEL_NOT_VALIDATED"
+
+
+def test_missing_metadata_means_not_validated(monkeypatch, tmp_path):
+    monkeypatch.setattr(agents, "META_PATH", tmp_path / "missing.json")
+    monkeypatch.setattr(agents, "predict_efficiency", lambda *a: pytest.fail("must not predict"))
+    assert agents.get_model_status()["gates_passed"] is False
+
+    state = _run(CLEAN, FakeChatModel())
+    assert state["verdict"] == "DO_NOT_PROCEED"
+    assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
+
+
+@pytest.mark.parametrize("contents", ["{not json", "[]", '{"gates": null}'])
+def test_broken_metadata_fails_closed(monkeypatch, tmp_path, contents):
+    meta = tmp_path / "meta.json"
+    meta.write_text(contents)
+    monkeypatch.setattr(agents, "META_PATH", meta)
+    monkeypatch.setattr(agents, "predict_efficiency", lambda *a: pytest.fail("must not predict"))
+    state = _run(CLEAN, FakeChatModel())
+
+    assert state["verdict"] == "DO_NOT_PROCEED"
+    (failure,) = state["failures"]
+    assert failure["code"] == "MODEL_NOT_VALIDATED"
+    assert failure["reason"] == "Efficiency model not validated"
 
 
 def test_predict_efficiency_passes_soc_to_model(monkeypatch, tmp_path):

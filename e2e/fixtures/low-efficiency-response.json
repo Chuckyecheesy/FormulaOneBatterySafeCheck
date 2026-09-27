@@ -1,0 +1,38 @@
+{
+  "verdict": "DO_NOT_PROCEED",
+  "stages": [
+    {
+      "stage": 1,
+      "name": "Overcharge",
+      "status": "passed"
+    },
+    {
+      "stage": 2,
+      "name": "Thermal",
+      "status": "passed"
+    },
+    {
+      "stage": 3,
+      "name": "Prediction",
+      "status": "failed"
+    }
+  ],
+  "failures": [
+    {
+      "stage": 3,
+      "stage_name": "Prediction",
+      "reason": "Predicted efficiency is too low, so the car cannot proceed into the race",
+      "recorded_kind": "calculated",
+      "recorded": [
+        "predicted efficiency = 65.00 % (XGBoost model vtest)"
+      ],
+      "threshold_label": "Required to pass",
+      "thresholds": [
+        "predicted efficiency ≥ 70 %"
+      ]
+    }
+  ],
+  "predicted_efficiency_pct": 65.0,
+  "comment": "Your battery is at risk of fire hazard during the middle of the race.",
+  "t_seconds": 3600.0
+}

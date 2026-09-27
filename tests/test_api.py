@@ -1,5 +1,8 @@
 """HTTP backend tests for the frontend (spec/01-requirements.md §1.1, spec/05-ui.md)."""
 
+import json
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,6 +10,10 @@ from formulatech import agents
 from formulatech.agents import build_race_graph
 from formulatech.api import create_app, validate_inputs
 from formulatech.config import load_thresholds
+
+# Backend response for a 65 % prediction, also served to the browser by the Playwright test.
+LOW_EFFICIENCY_FIXTURE = Path(__file__).resolve().parents[1] / "e2e" / "fixtures" / "low-efficiency-response.json"
+UI_FIELDS = ["verdict", "stages", "failures", "predicted_efficiency_pct", "comment", "t_seconds"]
 
 CLEAN = {"voltage_v": 3.9, "current_a": 0.5, "temperature_c": 25.0, "duration_min": 60, "soc_percent": 50.0}
 
@@ -44,11 +51,43 @@ def validated_model(monkeypatch):
     ("duration_min", -5, "Charging duration must be greater than 0 minutes."),
     ("soc_percent", 101, "State of charge must be between 0 and 100."),
     ("temperature_c", 150, "Battery temperature must be between -40 and 100."),
+    ("voltage_v", "inf", "Battery voltage must be a finite number."),
+    ("current_a", float("-inf"), "Battery current must be a finite number."),
+    ("soc_percent", True, "State of charge is required."),
+    ("voltage_v", None, "Battery voltage is required."),
+    ("voltage_v", [1], "Battery voltage must be a number."),
+    # just outside each limit
+    ("voltage_v", 10.0001, "Battery voltage must be between 0 and 10."),
+    ("voltage_v", -0.0001, "Battery voltage must be between 0 and 10."),
+    ("current_a", 500.01, "Battery current must be between -500 and 500."),
+    ("current_a", -500.01, "Battery current must be between -500 and 500."),
+    ("temperature_c", -40.01, "Battery temperature must be between -40 and 100."),
+    ("duration_min", 1440.01, "Charging duration must be between 0 and 1440."),
+    ("soc_percent", -0.001, "State of charge must be between 0 and 100."),
 ])
 def test_validation_errors(field, value, message):
     inputs, errors = validate_inputs({**CLEAN, field: value}, load_thresholds())
     assert errors == {field: message}
     assert field not in inputs
+
+
+@pytest.mark.parametrize("field, value", [
+    ("voltage_v", 0), ("voltage_v", 10),
+    ("current_a", -500), ("current_a", 500),
+    ("temperature_c", -40), ("temperature_c", 100),
+    ("duration_min", 1e-9), ("duration_min", 1440),
+    ("soc_percent", 0), ("soc_percent", 100),
+    ("voltage_v", "4.1"),  # numeric string
+])
+def test_values_at_limits_accepted(field, value):
+    inputs, errors = validate_inputs({**CLEAN, field: value}, load_thresholds())
+    assert errors == {}
+    assert inputs[field] == float(value)
+
+
+def test_missing_field_is_required():
+    raw = {k: v for k, v in CLEAN.items() if k != "soc_percent"}
+    assert validate_inputs(raw, load_thresholds())[1] == {"soc_percent": "State of charge is required."}
 
 
 def test_negative_current_allowed():
@@ -124,6 +163,28 @@ def test_low_efficiency_card(client, validated_model):
     assert card["recorded"] == ["predicted efficiency = 65.00 % (XGBoost model vtest)"]
     assert card["thresholds"] == ["predicted efficiency ≥ 70 %"]
     assert body["comment"] == agents.COMMENT_FIRE_RISK_IN_RACE
+
+
+def test_low_efficiency_does_not_proceed(client, validated_model):
+    validated_model(65.0)
+    response = client.post("/api/check", json=CLEAN)
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["verdict"] == "DO_NOT_PROCEED"
+    assert [s["status"] for s in body["stages"]] == ["passed", "passed", "failed"]
+    assert body["predicted_efficiency_pct"] == 65.0
+    (card,) = body["failures"]
+    assert card["stage"] == 3 and card["stage_name"] == "Prediction"
+    assert card["reason"] == "Predicted efficiency is too low, so the car cannot proceed into the race"
+    assert card["recorded_kind"] == "calculated"
+
+
+def test_low_efficiency_matches_e2e_fixture(client, validated_model):
+    """The Playwright test serves this fixture to the page, so it must match the real backend."""
+    validated_model(65.0)
+    body = client.post("/api/check", json=CLEAN).json()
+    assert {k: body[k] for k in UI_FIELDS} == json.loads(LOW_EFFICIENCY_FIXTURE.read_text())
 
 
 def test_ui_hides_model_validation_failure(client, monkeypatch):

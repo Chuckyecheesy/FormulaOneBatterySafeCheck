@@ -161,11 +161,15 @@ def _claims_proceed(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+# Model status when the metadata is missing or unreadable: the model counts as not validated.
+_UNVALIDATED_STATUS = {"version": None, "gates_passed": False, "tolerance_accuracy": None, "r2": None,
+                       "r2_train": None, "cv_mean": None, "cv_std": None}
+
+
 def get_model_status() -> dict[str, Any]:
     """Read the saved metadata from the trained model. Missing metadata means not validated."""
     if not META_PATH.exists():
-        return {"version": None, "gates_passed": False, "tolerance_accuracy": None, "r2": None,
-                "r2_train": None, "cv_mean": None, "cv_std": None}
+        return dict(_UNVALIDATED_STATUS)
 
     with META_PATH.open() as fh:
         meta = json.load(fh)
@@ -232,7 +236,11 @@ def _model_not_validated(status: dict[str, Any], cfg: dict, reason: str) -> dict
 
 def evaluate_prediction(inputs: dict[str, float], cfg: dict) -> dict[str, Any]:
     """R5/R6 in code: R6 if the model is not validated or cannot predict, else R5 with strict `<`."""
-    status = get_model_status()
+    try:
+        status = get_model_status()
+    except Exception:  # corrupt or malformed metadata: fail closed, never a false CAN PROCEED
+        logger.exception("Could not read the efficiency model metadata")
+        return _model_not_validated(_UNVALIDATED_STATUS, cfg, "Efficiency model not validated")
     if not status["gates_passed"]:
         return _model_not_validated(status, cfg, "Efficiency model not validated")
     try:
