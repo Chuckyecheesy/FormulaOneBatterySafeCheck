@@ -99,6 +99,7 @@ function setStages(statuses) {
 }
 
 function showRunning() {
+  document.body.classList.remove("incident-mode");
   progress.classList.remove("hidden");
   spinner.classList.remove("done");
   progressLabel.textContent = "Running safety checks…";
@@ -174,13 +175,18 @@ function renderResult(data) {
   resultEl.append(banner.cloneNode(true));
   resultEl.querySelector("h2").removeAttribute("id");
   failPopupBody.replaceChildren(banner);
-  failPopup.classList.remove("hidden");
-  failPopupClose.focus();
+  openFailPopup();
 }
 
 function closeFailPopup() {
   failPopup.classList.add("hidden");
   submitBtn.focus();
+}
+
+function openFailPopup() {
+  failPopup.classList.remove("hidden");
+  document.body.classList.add("incident-mode");
+  failPopupClose.focus();
 }
 
 failPopupClose.addEventListener("click", closeFailPopup);

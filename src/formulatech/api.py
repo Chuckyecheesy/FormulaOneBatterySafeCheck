@@ -212,6 +212,14 @@ def create_app(*, graph=None, cfg: dict | None = None) -> FastAPI:
 
     if FRONTEND_DIR.is_dir():
         app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+
+    @app.middleware("http")
+    async def dont_cache_frontend(request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.endswith((".html", ".css", ".js", ".svg")):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     return app
 
 

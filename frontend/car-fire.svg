@@ -1,47 +1,111 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 220" role="img" aria-label="Race car on fire">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" role="img" aria-label="Formula One car with a lithium battery on fire">
   <defs>
-    <radialGradient id="glow" cx="50%" cy="60%" r="60%">
-      <stop offset="0%" stop-color="#ffb347" stop-opacity="0.9"/>
-      <stop offset="60%" stop-color="#ff5a1f" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#2a0d05" stop-opacity="0"/>
+    <linearGradient id="bgGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2b120f"/>
+      <stop offset="100%" stop-color="#160a0a"/>
+    </linearGradient>
+    <radialGradient id="fireGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#ffd27d" stop-opacity="0.9"/>
+      <stop offset="30%" stop-color="#ff8b2b" stop-opacity="0.8"/>
+      <stop offset="70%" stop-color="#ff4618" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="flame" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0%" stop-color="#ff3b00"/>
-      <stop offset="55%" stop-color="#ff9500"/>
-      <stop offset="100%" stop-color="#ffe066"/>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff5bf"/>
+      <stop offset="18%" stop-color="#ffd66b"/>
+      <stop offset="50%" stop-color="#ff8d2b"/>
+      <stop offset="100%" stop-color="#ff2d00"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f75041"/>
+      <stop offset="40%" stop-color="#c8281a"/>
+      <stop offset="100%" stop-color="#7d130d"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#b2bec7"/>
+      <stop offset="100%" stop-color="#e2ebf3"/>
     </linearGradient>
   </defs>
 
-  <!-- fire glow -->
-  <ellipse cx="200" cy="130" rx="200" ry="110" fill="url(#glow)"/>
+  <rect width="900" height="420" fill="url(#bgGlow)"/>
+  <ellipse cx="450" cy="210" rx="520" ry="210" fill="url(#fireGlow)"/>
+  <ellipse cx="620" cy="180" rx="280" ry="160" fill="url(#fireGlow)"/>
+  <ellipse cx="260" cy="190" rx="220" ry="140" fill="url(#fireGlow)" opacity="0.7"/>
 
-  <!-- smoke -->
-  <g fill="#3b3b3b" opacity="0.55">
-    <circle cx="170" cy="30" r="22"/>
-    <circle cx="205" cy="18" r="26"/>
-    <circle cx="240" cy="32" r="20"/>
+  <g opacity="0.45" fill="#3b3b3b">
+    <circle cx="280" cy="60" r="20"/>
+    <circle cx="330" cy="40" r="28"/>
+    <circle cx="380" cy="58" r="22"/>
+    <circle cx="560" cy="68" r="24"/>
+    <circle cx="610" cy="50" r="30"/>
   </g>
 
-  <!-- flames -->
   <g fill="url(#flame)">
-    <path d="M150 140 C140 105 165 95 158 60 C185 85 190 105 182 140 Z"/>
-    <path d="M178 140 C168 95 200 80 196 38 C228 72 232 105 220 140 Z"/>
-    <path d="M214 140 C206 108 232 98 228 66 C252 92 256 115 246 140 Z"/>
+    <path d="M426 210 C416 170 435 160 434 120 C458 155 464 180 456 210 Z"/>
+    <path d="M454 210 C444 165 475 150 486 110 C513 150 514 184 500 210 Z"/>
+    <path d="M488 210 C480 180 503 165 510 138 C529 170 535 190 528 210 Z"/>
   </g>
 
-  <!-- race car body -->
   <g>
-    <path d="M40 160 L95 140 L150 132 L175 112 L230 112 L250 132 L330 138 L365 152 L365 170 L40 170 Z" fill="#b3261e"/>
-    <path d="M182 118 L224 118 L238 132 L170 132 Z" fill="#1c1e21"/>
-    <rect x="30" y="148" width="28" height="8" fill="#1c1e21"/>
-    <rect x="345" y="128" width="8" height="26" fill="#1c1e21"/>
-    <rect x="330" y="124" width="38" height="8" fill="#1c1e21"/>
-    <circle cx="105" cy="172" r="22" fill="#1c1e21"/>
-    <circle cx="105" cy="172" r="9" fill="#8a8f98"/>
-    <circle cx="300" cy="172" r="22" fill="#1c1e21"/>
-    <circle cx="300" cy="172" r="9" fill="#8a8f98"/>
+    <path d="M175 275 L305 246 L468 237 L585 252 L715 238 L780 263 L780 304 L175 304 Z" fill="url(#body)"/>
+    <path d="M445 236 L520 212 L610 212 L658 235 L622 256 L455 256 Z" fill="#171a1d"/>
+    <path d="M489 201 L572 196 L602 212 L540 212 Z" fill="#1c2128"/>
+    <path d="M318 212 L390 188 L455 188 L468 212 L330 212 Z" fill="#262d34"/>
+    <path d="M227 220 L265 200 L330 200 L345 220 L248 221 Z" fill="#e7eef5" opacity="0.8"/>
+    <path d="M610 219 L702 207 L775 221 L762 236 L624 236 Z" fill="#e7eef5" opacity="0.8"/>
+    <path d="M470 117 L500 88 L560 88 L585 118 L523 118 Z" fill="#f4f7fa" opacity="0.9"/>
+    <path d="M518 97 L552 97 L570 118 L505 118 Z" fill="#1d2126"/>
+    <path d="M489 118 L500 150 L438 150 L448 118 Z" fill="#f0f4f8"/>
+    <path d="M610 118 L620 150 L660 150 L651 118 Z" fill="#f0f4f8"/>
+    <path d="M132 264 L182 255 L206 276 L138 276 Z" fill="url(#wing)"/>
+    <path d="M736 264 L790 268 L820 290 L772 290 Z" fill="url(#wing)"/>
+
+    <g fill="#111417">
+      <circle cx="264" cy="304" r="44"/>
+      <circle cx="652" cy="304" r="44"/>
+      <circle cx="264" cy="304" r="17" fill="#a5afba"/>
+      <circle cx="652" cy="304" r="17" fill="#a5afba"/>
+    </g>
+
+    <g>
+      <path d="M404 212 h80 v28 h-81 z" fill="#c82015"/>
+      <path d="M412 214 h75 v8 h-75 z" fill="#f1d9a1" opacity="0.7"/>
+      <path d="M424 222 h42 v12 h-42 z" fill="#f6cc35" opacity="0.7"/>
+      <path d="M430 226 h32 v6 h-32 z" fill="#7e110d"/>
+      <path d="M445 150 L465 150 L482 170 L430 170 Z" fill="#1b2025"/>
+      <path d="M440 170 L488 170 L505 200 L425 200 Z" fill="#171d22"/>
+      <path d="M432 200 L430 248 L405 248 L408 200 Z" fill="#171d22"/>
+      <path d="M490 200 L513 248 L540 248 L536 200 Z" fill="#171d22"/>
+    </g>
+
   </g>
 
-  <!-- ground -->
-  <rect x="0" y="194" width="400" height="4" fill="#3b3b3b" opacity="0.6"/>
+  <!-- Lithium battery pack, combusted throughout -->
+  <g>
+    <rect x="390" y="228" width="250" height="46" rx="8" fill="#2a100c" stroke="#ffb15a" stroke-width="2"/>
+    <rect x="402" y="238" width="28" height="26" rx="3" fill="#ff5a12"/>
+    <rect x="436" y="238" width="28" height="26" rx="3" fill="#ffd27a"/>
+    <rect x="470" y="238" width="28" height="26" rx="3" fill="#ff2d00"/>
+    <rect x="504" y="238" width="28" height="26" rx="3" fill="#ff8d2b"/>
+    <rect x="538" y="238" width="28" height="26" rx="3" fill="#fff5bf"/>
+    <rect x="572" y="238" width="28" height="26" rx="3" fill="#ff4618"/>
+    <rect x="606" y="238" width="22" height="26" rx="3" fill="#ffb15a"/>
+  </g>
+  <g fill="url(#flame)">
+    <path d="M404 238 C398 170 414 120 408 70 C428 130 432 180 426 238 Z"/>
+    <path d="M438 238 C430 150 452 90 448 30 C472 100 478 170 466 238 Z"/>
+    <path d="M472 240 C466 140 490 70 500 10 C524 80 520 160 506 240 Z"/>
+    <path d="M506 238 C500 160 528 100 534 40 C556 110 548 180 536 238 Z"/>
+    <path d="M540 240 C536 150 560 80 572 20 C596 90 590 170 568 240 Z"/>
+    <path d="M574 238 C570 160 598 110 610 50 C628 120 620 190 600 238 Z"/>
+    <path d="M608 240 C604 180 622 140 630 90 C644 150 640 200 626 240 Z"/>
+    <path d="M300 250 C280 180 300 120 286 60 C320 130 340 190 348 250 Z"/>
+    <path d="M700 255 C720 170 760 110 790 40 C800 130 760 200 730 255 Z"/>
+  </g>
+
+  <g opacity="0.5" fill="#5d5d5d">
+    <path d="M120 350 L710 350" stroke="#4a4a4a" stroke-width="14" stroke-linecap="round"/>
+    <path d="M145 352 L260 352 L270 370 L156 370 Z" fill="#3a3a3a"/>
+    <path d="M590 352 L720 352 L730 370 L598 370 Z" fill="#3a3a3a"/>
+  </g>
 </svg>

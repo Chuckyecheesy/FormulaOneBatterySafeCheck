@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Race Readiness Check — FormulaTech</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <!-- Burning-car backdrop, fixed behind every view (spec/05-ui.md, Page backdrop) -->
@@ -85,11 +85,12 @@
   <!-- DO NOT PROCEED popup over the page; the burning-car backdrop stays visible behind it (spec/05-ui.md §3) -->
   <div id="fail-popup" class="popup-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="fail-popup-title">
     <div class="popup">
+      <img class="popup-art" src="car-fire.svg" alt="Formula One car with a lithium battery on fire">
       <div id="fail-popup-body"></div>
       <button id="fail-popup-close" type="button">Close</button>
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
