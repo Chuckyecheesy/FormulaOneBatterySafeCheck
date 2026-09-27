@@ -220,3 +220,14 @@ def test_huge_integer_is_a_field_error(client):
                            headers={"content-type": "application/json"})
     assert response.status_code == 422
     assert response.json() == {"errors": {"voltage_v": "Battery voltage must be a finite number."}}
+
+
+@pytest.mark.parametrize("minutes", [1e-200, 5e-324])
+def test_tiny_duration_never_renders_raw_inf(client, minutes):
+    """dT/dt overflows to inf for tiny t; the card must word it, not print the float (see _rate_unit)."""
+    body = client.post("/api/check", json={**CLEAN, "duration_min": minutes, "temperature_c": 30.0}).json()
+    recorded = [line for card in body["failures"] for line in card["recorded"]]
+    # d²T/dt² overflows for both durations; dT/dt only for the smaller one, so assert the invariant.
+    assert "d²T/dt² = above the measurable range" in recorded
+    assert not any("inf" in line or "nan" in line for line in recorded)
+    assert "inf" not in body["summary"] and "nan" not in body["summary"]

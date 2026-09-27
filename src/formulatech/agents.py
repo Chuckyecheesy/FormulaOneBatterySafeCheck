@@ -66,6 +66,15 @@ def _rate(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.4g}"  # 4 significant figures
 
 
+def _rate_unit(value: float | None, unit: str) -> str:
+    """A rate with its unit. A rate that overflowed to inf/nan is worded, never shown as raw `inf`."""
+    if value is not None and not math.isfinite(value):
+        if math.isnan(value):
+            return "not measurable"
+        return f"{'above' if value > 0 else 'below'} the measurable range"
+    return f"{_rate(value)} {unit}"
+
+
 def _temp(value: float) -> str:
     return f"{value:.2f}"  # 2 decimal places
 
@@ -84,13 +93,13 @@ def template_message(result: dict[str, Any], inputs: dict[str, float], cfg: dict
             )
         case "HIGH_DTDT":
             return (
-                f"Thermal stress from battery charging is at high risk. dT/dt: {_rate(rec['dT_dt'])} °C/s. "
+                f"Thermal stress from battery charging is at high risk. dT/dt: {_rate_unit(rec['dT_dt'], '°C/s')}. "
                 f"Fire hazard threshold: > {_fmt(th['dT_dt_max_c_per_s'])} °C/s."
             )
         case "HIGH_D2TDT2":
             return (
                 f"Heat is increasing at a very fast rate while the battery charges. "
-                f"d²T/dt²: {_rate(rec['d2T_dt2'])} °C/s². "
+                f"d²T/dt²: {_rate_unit(rec['d2T_dt2'], '°C/s²')}. "
                 f"Fire hazard threshold: > {_fmt(th['d2T_dt2_max_c_per_s2'])} °C/s²."
             )
         case "HIGH_TCHEM":

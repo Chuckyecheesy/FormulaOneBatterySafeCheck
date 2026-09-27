@@ -24,7 +24,7 @@ from formulatech.agents import (
     DEFAULT_OLLAMA_URL,
     PredictionUnavailable,
     _fmt,
-    _rate,
+    _rate_unit,
     _temp,
     build_race_graph,
     run_race_assessment,
@@ -109,11 +109,11 @@ def failure_card(failure: dict[str, Any], stage: int, cfg: dict) -> dict[str, An
             ]
         case "HIGH_DTDT":
             reason = failure["reason"]
-            recorded = [f"dT/dt = {_rate(rec['dT_dt'])} °C/s"]
+            recorded = [f"dT/dt = {_rate_unit(rec['dT_dt'], '°C/s')}"]
             thresholds = [f"dT/dt > {_fmt(th['dT_dt_max_c_per_s'])} °C/s"]
         case "HIGH_D2TDT2":
             reason = failure["reason"]
-            recorded = [f"d²T/dt² = {_rate(rec['d2T_dt2'])} °C/s²"]
+            recorded = [f"d²T/dt² = {_rate_unit(rec['d2T_dt2'], '°C/s²')}"]
             thresholds = [f"d²T/dt² > {_fmt(th['d2T_dt2_max_c_per_s2'])} °C/s²"]
         case "HIGH_TCHEM":
             reason = failure["reason"]
