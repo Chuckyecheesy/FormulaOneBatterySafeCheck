@@ -21,7 +21,22 @@ body {
   color: var(--text);
 }
 
-.container { max-width: 640px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+/* Burning-car backdrop: fixed to the viewport so it stays the same on every view
+   (form, running, CAN PROCEED, DO NOT PROCEED popup, errors) and while scrolling. */
+.page-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    url("car-fire.svg") no-repeat center bottom 4vh / min(1100px, 100%) auto,
+    radial-gradient(ellipse at 50% 85%, rgba(255, 149, 0, 0.18), rgba(255, 149, 0, 0) 60%);
+  opacity: 0.45;
+  animation: flicker 1.2s ease-in-out infinite alternate;
+}
+@keyframes flicker { from { filter: brightness(1); } to { filter: brightness(1.2); } }
+
+.container { position: relative; z-index: 1; max-width: 640px; margin: 0 auto; padding: 2rem 1rem 4rem; }
 
 header h1 { margin: 0; font-size: 1.75rem; }
 .subtitle { margin: 0.25rem 0 1.5rem; color: var(--muted); }
@@ -115,7 +130,8 @@ button:disabled { background: var(--skip); cursor: not-allowed; }
 
 .comment { margin-top: 1rem; font-weight: 600; }
 
-/* DO NOT PROCEED popup with burning-car backdrop */
+/* DO NOT PROCEED popup. The overlay is a light, translucent scrim so the same
+   burning-car page backdrop stays visible behind it. */
 .popup-overlay {
   position: fixed;
   inset: 0;
@@ -124,7 +140,7 @@ button:disabled { background: var(--skip); cursor: not-allowed; }
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: radial-gradient(ellipse at center, rgba(120, 30, 5, 0.85), rgba(20, 5, 2, 0.92));
+  background: rgba(244, 245, 247, 0.6);
 }
 .popup-overlay.hidden { display: none; }
 .popup {
@@ -134,16 +150,8 @@ button:disabled { background: var(--skip); cursor: not-allowed; }
   overflow-y: auto;
   background: var(--card);
   border-radius: 10px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
 }
-.popup-art {
-  display: block;
-  width: 100%;
-  background: #1a0804;
-  border-radius: 10px 10px 0 0;
-  animation: flicker 1.2s ease-in-out infinite alternate;
-}
-@keyframes flicker { from { filter: brightness(1); } to { filter: brightness(1.2); } }
 .popup .banner { margin: 1rem; }
 .popup button { margin: 0 auto 1.25rem; }
 
