@@ -18,9 +18,6 @@ const progressLabel = document.getElementById("progress-label");
 const spinner = document.getElementById("spinner");
 const stagesList = document.getElementById("stages");
 const resultEl = document.getElementById("result");
-const failPopup = document.getElementById("fail-popup");
-const failPopupBody = document.getElementById("fail-popup-body");
-const failPopupClose = document.getElementById("fail-popup-close");
 
 let limits = null; // input_limits from spec/thresholds.yaml, served by /api/config
 let secondsPerMinute = 60;
@@ -99,7 +96,6 @@ function setStages(statuses) {
 }
 
 function showRunning() {
-  document.body.classList.remove("incident-mode");
   progress.classList.remove("hidden");
   spinner.classList.remove("done");
   progressLabel.textContent = "Running safety checks…";
@@ -154,7 +150,7 @@ function renderResult(data) {
     return;
   }
 
-  const banner = el("div", { class: "banner fail" }, el("h2", { id: "fail-popup-title" }, "⛔ DO NOT PROCEED"));
+  const banner = el("div", { class: "banner fail" }, el("h2", {}, "⛔ DO NOT PROCEED"));
 
   // Group failure cards by the stage that failed. Only one stage can fail, because
   // the pipeline stops at the first failed stage; every failure in that stage is listed.
@@ -171,31 +167,9 @@ function renderResult(data) {
 
   if (data.comment) banner.append(el("p", { class: "comment" }, `Comment: ${data.comment}`));
 
-  // Show the failure in the burning-car popup; keep a copy on the page for when it is closed.
-  resultEl.append(banner.cloneNode(true));
-  resultEl.querySelector("h2").removeAttribute("id");
-  failPopupBody.replaceChildren(banner);
-  openFailPopup();
+  resultEl.append(banner);
+  resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
 }
-
-function closeFailPopup() {
-  failPopup.classList.add("hidden");
-  submitBtn.focus();
-}
-
-function openFailPopup() {
-  failPopup.classList.remove("hidden");
-  document.body.classList.add("incident-mode");
-  failPopupClose.focus();
-}
-
-failPopupClose.addEventListener("click", closeFailPopup);
-failPopup.addEventListener("click", (event) => {
-  if (event.target === failPopup) closeFailPopup();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !failPopup.classList.contains("hidden")) closeFailPopup();
-});
 
 function renderRequestError(message) {
   resultEl.classList.remove("hidden");
@@ -216,7 +190,6 @@ form.addEventListener("submit", async (event) => {
 
   submitBtn.disabled = true;
   resultEl.classList.add("hidden");
-  failPopup.classList.add("hidden");
   showRunning();
 
   try {

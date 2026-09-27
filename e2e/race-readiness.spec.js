@@ -55,53 +55,36 @@ test("a negative duration is a field error", async ({ page }) => {
   await expect(page.locator("#submit")).toBeDisabled();
 });
 
-test("overcharge opens the fire popup and stays on the page after close", async ({ page }) => {
+test("overcharge shows DO NOT PROCEED on the page", async ({ page }) => {
   await fillReading(page, { voltage_v: "5.0", current_a: "-1.2" });
   await page.locator("#submit").click();
 
-  const popup = page.locator("#fail-popup");
-  await expect(popup).toBeVisible();
-  await expect(popup.getByRole("heading", { name: "DO NOT PROCEED" })).toBeVisible();
-  await expect(popup.getByText("Stage 1: Overcharge")).toBeVisible();
-  await expect(popup.getByText("Battery already overcharged")).toBeVisible();
-  await expect(popup.getByText("battery voltage 5.00 V, battery current -1.20 A")).toBeVisible();
-  await expect(popup.getByText("battery voltage > 4.2 V AND battery current < 0 A")).toBeVisible();
-  await expect(popup.getByText("Your battery is at risk of fire hazard if you start the race now.")).toBeVisible();
-  await expect(popup.locator("img")).toBeVisible();
-  await expect(popup.getByText(/\bR1\b/)).toHaveCount(0);
-  await expect(popup.getByText(/OVERCHARGED/)).toHaveCount(0);
-
-  await page.locator("#fail-popup-close").click();
-  await expect(popup).toBeHidden();
-
   const result = page.locator("#result");
-  await expect(result.getByText("DO NOT PROCEED")).toBeVisible();
+  await expect(result).toBeVisible();
+  await expect(result.getByRole("heading", { name: "DO NOT PROCEED" })).toBeVisible();
+  await expect(result.getByText("Stage 1: Overcharge")).toBeVisible();
   await expect(result.getByText("Battery already overcharged")).toBeVisible();
+  await expect(result.getByText("battery voltage 5.00 V, battery current -1.20 A")).toBeVisible();
+  await expect(result.getByText("battery voltage > 4.2 V AND battery current < 0 A")).toBeVisible();
+  await expect(result.getByText("Your battery is at risk of fire hazard if you start the race now.")).toBeVisible();
+  await expect(result.getByText(/\bR1\b/)).toHaveCount(0);
+  await expect(result.getByText(/OVERCHARGED/)).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator("#stages [data-stage='1']")).toHaveClass("failed");
   await expect(page.locator("#stages [data-stage='2']")).toHaveClass("skipped");
   await expect(page.locator("#stages [data-stage='3']")).toHaveClass("skipped");
-});
-
-test("Escape closes the failure popup", async ({ page }) => {
-  await fillReading(page, { voltage_v: "5.0", current_a: "-1.2" });
-  await page.locator("#submit").click();
-  await expect(page.locator("#fail-popup")).toBeVisible();
-
-  await page.keyboard.press("Escape");
-  await expect(page.locator("#fail-popup")).toBeHidden();
-  await expect(page.locator("#result").getByText("DO NOT PROCEED")).toBeVisible();
 });
 
 test("one thermal failure stops before prediction", async ({ page }) => {
   await fillReading(page, { temperature_c: "25.31" });
   await page.locator("#submit").click();
 
-  const popup = page.locator("#fail-popup");
-  await expect(popup.getByText("Stage 2: Thermal")).toBeVisible();
-  await expect(popup.getByText("Heat exposure to the surrounding environment is too high")).toBeVisible();
-  await expect(popup.getByText("T_chem = 0.31 °C")).toBeVisible();
-  await expect(popup.getByText("T_chem > 0.3 °C")).toBeVisible();
-  await expect(popup.getByText("dT/dt")).toHaveCount(0);
+  const result = page.locator("#result");
+  await expect(result.getByText("Stage 2: Thermal")).toBeVisible();
+  await expect(result.getByText("Heat exposure to the surrounding environment is too high")).toBeVisible();
+  await expect(result.getByText("T_chem = 0.31 °C")).toBeVisible();
+  await expect(result.getByText("T_chem > 0.3 °C")).toBeVisible();
+  await expect(result.getByText("dT/dt")).toHaveCount(0);
   await expect(page.locator("#stages [data-stage='3']")).toHaveClass("skipped");
 });
 
@@ -109,14 +92,14 @@ test("every thermal failure is listed together", async ({ page }) => {
   await fillReading(page, { temperature_c: "30", duration_min: "1" });
   await page.locator("#submit").click();
 
-  const popup = page.locator("#fail-popup");
-  await expect(popup.getByText("Thermal stress from battery charging is at high risk")).toBeVisible();
-  await expect(popup.getByText("dT/dt = 0.08333 °C/s")).toBeVisible();
-  await expect(popup.getByText("dT/dt > 0.03 °C/s")).toBeVisible();
-  await expect(popup.getByText("Heat is increasing at a very fast rate while the battery charges")).toBeVisible();
-  await expect(popup.getByText("d²T/dt² = 0.001389 °C/s²")).toBeVisible();
-  await expect(popup.getByText("Heat exposure to the surrounding environment is too high")).toBeVisible();
-  await expect(popup.getByText("T_chem = 5.00 °C")).toBeVisible();
+  const result = page.locator("#result");
+  await expect(result.getByText("Thermal stress from battery charging is at high risk")).toBeVisible();
+  await expect(result.getByText("dT/dt = 0.08333 °C/s")).toBeVisible();
+  await expect(result.getByText("dT/dt > 0.03 °C/s")).toBeVisible();
+  await expect(result.getByText("Heat is increasing at a very fast rate while the battery charges")).toBeVisible();
+  await expect(result.getByText("d²T/dt² = 0.001389 °C/s²")).toBeVisible();
+  await expect(result.getByText("Heat exposure to the surrounding environment is too high")).toBeVisible();
+  await expect(result.getByText("T_chem = 5.00 °C")).toBeVisible();
   await expect(page.locator("#stages [data-stage='1']")).toHaveClass("passed");
   await expect(page.locator("#stages [data-stage='2']")).toHaveClass("failed");
   await expect(page.locator("#stages [data-stage='3']")).toHaveClass("skipped");
@@ -126,7 +109,6 @@ test("a clean reading can proceed", async ({ page }) => {
   await fillReading(page, {});
   await page.locator("#submit").click();
 
-  await expect(page.locator("#fail-popup")).toBeHidden();
   const result = page.locator("#result");
   await expect(result.getByRole("heading", { name: "CAN PROCEED" })).toBeVisible();
   await expect(result.getByText("All safety checks passed.")).toBeVisible();
@@ -148,24 +130,21 @@ test("a predicted efficiency below 70 % does not proceed", async ({ page }) => {
   await fillReading(page, {});
   await page.locator("#submit").click();
 
-  const popup = page.locator("#fail-popup");
-  await expect(popup).toBeVisible();
-  await expect(popup.getByRole("heading", { name: "DO NOT PROCEED" })).toBeVisible();
-  await expect(popup.getByText("Stage 3: Prediction")).toBeVisible();
-  await expect(popup.getByText("Predicted efficiency is too low, so the car cannot proceed into the race")).toBeVisible();
-  await expect(popup.getByText("Recorded (calculated):")).toBeVisible();
-  await expect(popup.getByText("predicted efficiency = 65.00 % (XGBoost model vtest)")).toBeVisible();
-  await expect(popup.getByText("Required to pass:")).toBeVisible();
-  await expect(popup.getByText("predicted efficiency ≥ 70 %")).toBeVisible();
-  await expect(popup.getByText("Your battery is at risk of fire hazard during the middle of the race.")).toBeVisible();
-  await expect(popup.getByText("if you start the race now")).toHaveCount(0);
-  await expect(popup.getByText(/\bR5\b|LOW_EFFICIENCY/)).toHaveCount(0);
+  const result = page.locator("#result");
+  await expect(result).toBeVisible();
+  await expect(result.getByRole("heading", { name: "DO NOT PROCEED" })).toBeVisible();
+  await expect(result.getByText("Stage 3: Prediction")).toBeVisible();
+  await expect(result.getByText("Predicted efficiency is too low, so the car cannot proceed into the race")).toBeVisible();
+  await expect(result.getByText("Recorded (calculated):")).toBeVisible();
+  await expect(result.getByText("predicted efficiency = 65.00 % (XGBoost model vtest)")).toBeVisible();
+  await expect(result.getByText("Required to pass:")).toBeVisible();
+  await expect(result.getByText("predicted efficiency ≥ 70 %")).toBeVisible();
+  await expect(result.getByText("Your battery is at risk of fire hazard during the middle of the race.")).toBeVisible();
+  await expect(result.getByText("if you start the race now")).toHaveCount(0);
+  await expect(result.getByText(/\bR5\b|LOW_EFFICIENCY/)).toHaveCount(0);
 
   expect(sent).toEqual({ voltage_v: 4.1, current_a: 0.5, temperature_c: 25, duration_min: 60, soc_percent: 50 });
 
-  await page.locator("#fail-popup-close").click();
-  const result = page.locator("#result");
-  await expect(result.getByText("DO NOT PROCEED")).toBeVisible();
   await expect(result.getByText("CAN PROCEED", { exact: true })).toHaveCount(0);
   await expect(page.locator("#stages [data-stage='1']")).toHaveClass("passed");
   await expect(page.locator("#stages [data-stage='2']")).toHaveClass("passed");

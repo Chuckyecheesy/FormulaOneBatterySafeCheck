@@ -129,38 +129,4 @@ button:disabled { background: var(--skip); cursor: not-allowed; }
 
 .comment { margin-top: 1rem; font-weight: 600; }
 
-/* DO NOT PROCEED popup. The overlay is a light, translucent scrim so the same
-   burning-car page backdrop stays visible behind it. */
-.popup-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(22, 10, 10, 0.35);
-}
-.popup-overlay.hidden { display: none; }
-.popup {
-  width: 100%;
-  max-width: 700px;
-  max-height: 100%;
-  overflow-y: auto;
-  background: rgba(18, 10, 8, 0.94);
-  border: 1px solid rgba(255, 171, 120, 0.3);
-  border-radius: 14px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.58);
-}
-.popup-art {
-  display: block;
-  width: 100%;
-  background: linear-gradient(180deg, #180a0a 0%, #2a0d08 50%, #1a0804 100%);
-  border-radius: 14px 14px 0 0;
-  animation: flicker 1.2s ease-in-out infinite alternate;
-}
-@keyframes flicker { from { filter: brightness(1) saturate(1); } to { filter: brightness(1.2) saturate(1.15); } }
-.popup .banner { margin: 1rem; }
-.popup button { margin: 0 auto 1.25rem; }
-
 .request-error { color: var(--fail); }
