@@ -298,3 +298,50 @@ def test_no_comment_when_model_not_validated(monkeypatch):
     assert state["failures"][0]["code"] == "MODEL_NOT_VALIDATED"
     assert state["comment"] == ""
 
+
+
+# ---- @tool wrappers (make_check_tools) ----
+
+
+@pytest.fixture
+def check_tools():
+    return agents.make_check_tools(load_thresholds())
+
+
+def test_check_tools_names_and_args(check_tools):
+    assert {name: list(t.args) for name, t in check_tools.items()} == {
+        "check_overcharge_tool": ["voltage_v", "current_a"],
+        "check_thermal_tool": ["temperature_c", "duration_min"],
+        "check_efficiency_tool": ["voltage_v", "current_a", "temperature_c", "duration_min", "soc_percent"],
+    }
+
+
+def test_check_tools_match_deterministic_rules(check_tools, validated_model):
+    from dataclasses import asdict
+
+    from formulatech.rules import check_overcharge, check_thermal
+
+    cfg = load_thresholds()
+    validated_model(65.0)
+    assert check_tools["check_overcharge_tool"].invoke({"voltage_v": 5.0, "current_a": -1.2}) == [
+        asdict(check_overcharge(5.0, -1.2, cfg))]
+    assert check_tools["check_thermal_tool"].invoke({"temperature_c": 30.0, "duration_min": 1}) == [
+        asdict(r) for r in check_thermal(30.0, 1, cfg)]
+    assert check_tools["check_efficiency_tool"].invoke(CLEAN) == [agents.evaluate_prediction(CLEAN, cfg)]
+
+
+def test_check_tool_docstrings_have_no_threshold_literals(check_tools):
+    cfg = load_thresholds()
+    limits = [cfg["overcharge"]["voltage_max_v"], *cfg["thermal"].values(), cfg["efficiency"]["min_percent"]]
+    for t in check_tools.values():
+        for value in limits:
+            if isinstance(value, (int, float)) and value not in (0, 25):  # 0/25 can appear as ordinary words/units
+                assert f"{value:g}" not in t.description, (t.name, value)
+
+
+def test_check_tools_use_the_given_cfg():
+    cfg = load_thresholds()
+    strict = {**cfg, "thermal": {**cfg["thermal"], "dT_dt_max_c_per_s": 0.0}}
+    tools = agents.make_check_tools(strict)
+    (dtdt, *_) = tools["check_thermal_tool"].invoke({"temperature_c": 25.5, "duration_min": 60})
+    assert dtdt["code"] == "HIGH_DTDT" and not dtdt["passed"]

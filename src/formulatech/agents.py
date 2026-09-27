@@ -15,6 +15,7 @@ from dataclasses import asdict
 from typing import Any, Callable, TypedDict
 
 import pandas as pd
+from langchain_core.tools import BaseTool, tool
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 from xgboost import XGBRegressor
@@ -286,6 +287,44 @@ def _any_failed(results: list[dict[str, Any]]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# @tool wrappers around the deterministic checks
+# ---------------------------------------------------------------------------
+
+
+def make_check_tools(cfg: dict) -> dict[str, BaseTool]:
+    """Wrap each stage's deterministic check as a @tool bound to `cfg`.
+
+    The graph nodes invoke these in code (spec/04-agents.md §3.3); the LLM never calls them
+    in the pipeline. The same tools can be given to a read-only Q&A agent. Docstrings hold no
+    threshold values: the returned records carry the thresholds from thresholds.yaml.
+    """
+
+    @tool
+    def check_overcharge_tool(voltage_v: float, current_a: float) -> list[dict]:
+        """Run the overcharge check on a battery voltage in V and battery current in A.
+        Returns one check result record with the recorded values, thresholds and pass/fail."""
+        return [asdict(check_overcharge(voltage_v, current_a, cfg))]
+
+    @tool
+    def check_thermal_tool(temperature_c: float, duration_min: float) -> list[dict]:
+        """Run the thermal checks (dT/dt, d²T/dt², T_chem) on a battery temperature in °C
+        measured after charging for duration_min minutes. Returns one record per check."""
+        return [asdict(r) for r in check_thermal(temperature_c, duration_min, cfg)]
+
+    @tool
+    def check_efficiency_tool(
+        voltage_v: float, current_a: float, temperature_c: float, duration_min: float, soc_percent: float
+    ) -> list[dict]:
+        """Check the efficiency model's quality gates, then predict efficiency (%) for the reading
+        and compare it with the minimum. Returns one record: model not validated, or the prediction."""
+        inputs = {"voltage_v": voltage_v, "current_a": current_a, "temperature_c": temperature_c,
+                  "duration_min": duration_min, "soc_percent": soc_percent}
+        return [evaluate_prediction(inputs, cfg)]
+
+    return {t.name: t for t in (check_overcharge_tool, check_thermal_tool, check_efficiency_tool)}
+
+
+# ---------------------------------------------------------------------------
 # Graph
 # ---------------------------------------------------------------------------
 
@@ -305,6 +344,7 @@ def build_race_graph(
     except Exception:
         logger.warning("Could not create the LLM; all explanations will use templates", exc_info=True)
         llm = None
+    tools = make_check_tools(cfg)
 
     def explained(state: RaceState, results: list[dict[str, Any]], stage: int) -> dict:
         """Partial update: append results; explain only the failures (nothing to explain on a pass)."""
@@ -312,19 +352,27 @@ def build_race_graph(
         new = [explain(llm, r, template_message(r, state["inputs"], cfg)) for r in results if not r["passed"]]
         return {"stage_results": state["stage_results"] + results, "explanations": state["explanations"] + new}
 
+    def run_tool(name: str, inputs: dict[str, float]) -> list[dict[str, Any]]:
+        """Invoke a check tool in code with its arguments taken from the inputs (never from the LLM)."""
+        check = tools[name]
+        return check.invoke({k: inputs[k] for k in check.args})
+
     # Agent 1: Overcharge (stage 1)
     def overcharge_node(state: RaceState) -> dict:
-        i = state["inputs"]
-        return explained(state, [asdict(check_overcharge(i["voltage_v"], i["current_a"], cfg))], 1)
+        return explained(state, run_tool("check_overcharge_tool", state["inputs"]), 1)
 
     # Agent 2: Thermal (stage 2); all three rules always run (FR-2)
     def thermal_node(state: RaceState) -> dict:
-        i = state["inputs"]
-        return explained(state, [asdict(r) for r in check_thermal(i["temperature_c"], i["duration_min"], cfg)], 2)
+        return explained(state, run_tool("check_thermal_tool", state["inputs"]), 2)
 
     # Agent 3: Prediction (stage 3)
     def prediction_node(state: RaceState) -> dict:
-        return explained(state, [evaluate_prediction(state["inputs"], cfg)], 3)
+        try:
+            results = run_tool("check_efficiency_tool", state["inputs"])
+        except Exception:  # missing or invalid input: fail closed (FR-4)
+            logger.exception("Efficiency check could not run")
+            results = [_model_not_validated(_UNVALIDATED_STATUS, cfg, "Efficiency model could not produce a prediction")]
+        return explained(state, results, 3)
 
     # Agent 4: Race Decision; no LLM for verdict, failures, summary or comment
     def decision_node(state: RaceState) -> dict:

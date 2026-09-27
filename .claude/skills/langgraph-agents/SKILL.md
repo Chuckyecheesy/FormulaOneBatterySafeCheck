@@ -16,16 +16,16 @@ Write agent code that follows [spec/04-agents.md](../../../spec/04-agents.md): *
 ## Hard Rules (from CLAUDE.md, never break)
 1. **Local only.** Use Ollama through `langchain-ollama`. Never use a hosted LLM API (OpenAI, Anthropic, and so on).
 2. **One `StateGraph`, one node per agent:** Overcharge → Thermal → Prediction → Race Decision, with `add_conditional_edges` for the two short-circuits.
-3. **Each stage is a `create_react_agent` that calls its check through `@tool`, but the LLM cannot change the result.** Stage tools take **no arguments** (they read the inputs from graph state), the node reads the result from the tool's **artifact** (never from LLM text), and if the LLM skips the tool or Ollama fails, the node runs the check in code anyway.
+3. **Nodes run their check in code; the LLM only explains** (spec/04-agents.md §3.3). Each check is a `@tool` from `make_check_tools(cfg)`, but in the pipeline the node invokes it with arguments taken from `state["inputs"]`. There is no `create_react_agent` in the pipeline, and the LLM never calls a pipeline tool or picks its arguments.
 4. **Routing and verdict read `stage_results`, never LLM text.** The verdict comes from `compute_verdict`.
 5. **No threshold literals in code or prompts.** Read them from `spec/thresholds.yaml` via `load_thresholds()` and pass them into the prompt as data.
 6. **Always have a fallback.** If Ollama is down, errors, or takes longer than 8 s, use the template message from [spec/05-ui.md](../../../spec/05-ui.md) §3.1. The graph still finishes with the computed verdict.
 
 ## Prerequisites & Model Choice
-Run an Ollama version and an open-weight model that **natively supports tool calling** (function calling). Models without tool calling return plain text instead of properly formatted tool requests, and a tool-calling agent loop (Template B) breaks.
+The check pipeline (Template A) only asks the model to write text, so any chat model works. Only the optional Q&A agent (Template B) needs a model that **natively supports tool calling** (function calling). Without it, the model returns plain text instead of tool requests and the loop breaks.
 
 - **Recommended models:** `llama3.2` (the project default, 3B), `llama3.1:8b` (larger, slower), or `qwen2.5:7b`.
-- Both templates use tool calling. If a model skips the tool, Template A still runs the check in code and uses the template message, so the verdict is never affected, only the explanation.
+- The verdict never depends on the model: if Ollama is down or replies badly, Template A uses the template message.
 
 ```bash
 ollama pull llama3.2         # or: ollama pull llama3.1:8b
@@ -59,166 +59,102 @@ llm = ChatOllama(
 ```
 
 ### 3. Template A: the check pipeline (use this for stages 1–4)
-One `StateGraph` with one node per agent. Each stage node (1–3) builds a `create_react_agent` with a single `@tool` that wraps the stage's deterministic check. The agent calls the tool and explains the result. Three safeguards keep the decision in code:
+This is the pattern in [src/formulatech/agents.py](../../../src/formulatech/agents.py) and [spec/04-agents.md](../../../spec/04-agents.md) §3.3. One `StateGraph` with one node per agent. Each stage's deterministic check is wrapped as a `@tool` by `make_check_tools(cfg)`, but **the node invokes the tool in code**, with the arguments taken from `state["inputs"]`. There is no agent loop and the LLM never calls a pipeline tool. Every node follows two steps:
 
-- **No tool arguments.** The tool reads `state["inputs"]` through a closure, so the LLM cannot pass made-up values.
-- **Results come from the artifact.** `response_format="content_and_artifact"` gives the LLM the JSON as `content` and gives the node the raw records as `ToolMessage.artifact`. Only the artifact goes into `stage_results`.
-- **The check always runs.** If the LLM never calls the tool, Ollama is down, or the loop hits `recursion_limit`, the node calls the tool itself and uses the §3.1 template message.
+1. **Run the tool in code** and append its records (tagged with `stage`) to `stage_results`.
+2. **Explain only the failures.** `explain(llm, result, fallback)` makes one `llm.invoke(prompt)` call per failed record, with the record as JSON in the prompt. On any error, timeout or empty reply it returns the §3.1 `template_message`. A stage that passed makes no LLM call.
 
-The Race Decision node has no agent: `verdict`, `failures` and `summary` come from `compute_verdict` and `template_message`, and the summary states every failed check reason. `compute_verdict`, `evaluate_prediction` and `template_message` are the deterministic helpers in `src/formulatech/agents.py`.
+The Race Decision node has no LLM: `verdict` and `failures` come from `compute_verdict`, `summary` from `template_message` (every failed check reason), and `comment` is the fixed §3.2 sentence chosen by the failed stage. If an explanation claims the car can proceed on a DO NOT PROCEED verdict, the node logs the mismatch and the computed verdict stands.
 
 ```python
-import json
-import warnings
 from dataclasses import asdict
-from typing import Any, Callable, TypedDict
+from typing import Any, TypedDict
 
-from langchain_core.messages import ToolMessage
-from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
+from langchain_core.tools import BaseTool, tool
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import create_react_agent
 
-from formulatech.agents import compute_verdict, evaluate_prediction, template_message
-from formulatech.config import load_thresholds
 from formulatech.rules import check_overcharge, check_thermal
 
-warnings.filterwarnings("ignore", message=".*create_react_agent.*")  # deprecated in LangGraph 1.x, still supported
 
-cfg = load_thresholds()
-llm = ChatOllama(model="llama3.2", temperature=0, num_predict=150, client_kwargs={"timeout": 8})
-
-STAGE_PROMPT = (
-    "You are one stage of a pre-race battery safety check. Call your check tool exactly once. "
-    "Then explain the tool result to a race engineer in one or two sentences. Do not change the "
-    "result. Include the recorded value(s) and threshold(s). Do not mention rule IDs or reason codes."
-)
-
-
-class CheckState(TypedDict):
-    inputs: dict[str, float]             # voltage_v, current_a, temperature_c, duration_min
-    stage_results: list[dict[str, Any]]  # tool artifacts, appended by each node
+class RaceState(TypedDict):
+    inputs: dict[str, float]             # voltage_v, current_a, temperature_c, duration_min, soc_percent
+    stage_results: list[dict[str, Any]]  # check result records, appended by each node
     explanations: list[str]              # LLM text only; never read back into the verdict
     verdict: str | None                  # set only by the decision node, from compute_verdict
     failures: list[dict[str, Any]]
     summary: str
+    comment: str                         # fixed risk comment (05-ui.md §3.2); empty on CAN_PROCEED and R6
 
 
-def stage_tool(name: str, description: str, check: Callable[[], list[dict]]):
-    """Wrap a deterministic check as a no-argument @tool, so the LLM cannot change the inputs.
+def make_check_tools(cfg: dict) -> dict[str, BaseTool]:
+    """Wrap each stage's check as a @tool bound to cfg. Nodes invoke these in code."""
 
-    content_and_artifact: the LLM sees the JSON content; the node reads the artifact.
-    """
-    @tool(name, description=description, response_format="content_and_artifact")
-    def run() -> tuple[str, list[dict]]:
-        results = check()
-        return json.dumps(results, default=str), results
-    return run
+    @tool
+    def check_overcharge_tool(voltage_v: float, current_a: float) -> list[dict]:
+        """Run the overcharge check on a battery voltage in V and battery current in A.
+        Returns one check result record with the recorded values, thresholds and pass/fail."""
+        return [asdict(check_overcharge(voltage_v, current_a, cfg))]
+
+    @tool
+    def check_thermal_tool(temperature_c: float, duration_min: float) -> list[dict]:
+        """Run the thermal checks (dT/dt, d²T/dt², T_chem) on a battery temperature in °C
+        measured after charging for duration_min minutes. Returns one record per check."""
+        return [asdict(r) for r in check_thermal(temperature_c, duration_min, cfg)]
+
+    # check_efficiency_tool wraps evaluate_prediction (R6 if not validated, else R5)
+    return {t.name: t for t in (check_overcharge_tool, check_thermal_tool)}
 
 
-def run_stage_agent(state: CheckState, check_tool, task: str) -> dict:
-    """One create_react_agent per stage: the agent calls the tool and explains the result."""
-    results, text = None, ""
+def build_race_graph(*, model_factory=None, cfg=None):
+    cfg = cfg if cfg is not None else load_thresholds()
     try:
-        agent = create_react_agent(llm, tools=[check_tool], prompt=STAGE_PROMPT)
-        out = agent.invoke({"messages": [("user", task)]}, {"recursion_limit": 6})
-        tool_msgs = [m for m in out["messages"] if isinstance(m, ToolMessage) and m.name == check_tool.name]
-        if tool_msgs:
-            results = tool_msgs[-1].artifact            # the tool's own output, not LLM text
-            text = str(out["messages"][-1].content).strip()
-    except Exception:                                  # Ollama down, error, timeout, recursion limit
-        pass
-    if results is None:                                # LLM skipped the tool: run the check in code anyway
-        results = check_tool.invoke({"type": "tool_call", "id": "fallback", "name": check_tool.name,
-                                     "args": {}}).artifact
-        text = ""
-    failed = [r for r in results if not r["passed"]]
-    if failed:  # nothing to explain on a pass; template fallback if the LLM gave no text (NFR-2)
-        text = text or " ".join(template_message(r, state["inputs"], cfg) for r in failed)
-    update = {"stage_results": state["stage_results"] + results}
-    if failed:
-        update["explanations"] = state["explanations"] + [text]
-    return update
+        llm = (model_factory or default_ollama)()
+    except Exception:
+        llm = None                                   # every explanation uses the template
+    tools = make_check_tools(cfg)
 
+    def run_tool(name: str, inputs: dict[str, float]) -> list[dict[str, Any]]:
+        check = tools[name]                          # arguments come from state, never from the LLM
+        return check.invoke({k: inputs[k] for k in check.args})
 
-# ---- Agent 1: Overcharge (stage 1) ----
-def overcharge_node(state: CheckState) -> dict:
-    i = state["inputs"]
-    check_tool = stage_tool(
-        "check_overcharge",
-        "Run the overcharge check on the recorded battery voltage and current. Takes no arguments.",
-        lambda: [asdict(check_overcharge(i["voltage_v"], i["current_a"], cfg))],
-    )
-    return run_stage_agent(state, check_tool, "Check whether the battery is already overcharged.")
+    def explained(state: RaceState, results: list[dict[str, Any]], stage: int) -> dict:
+        results = [{**r, "stage": stage} for r in results]
+        new = [explain(llm, r, template_message(r, state["inputs"], cfg)) for r in results if not r["passed"]]
+        return {"stage_results": state["stage_results"] + results, "explanations": state["explanations"] + new}
 
+    def overcharge_node(state: RaceState) -> dict:
+        return explained(state, run_tool("check_overcharge_tool", state["inputs"]), 1)
 
-# ---- Agent 2: Thermal (stage 2) — the tool always runs all three rules (FR-2) ----
-def thermal_node(state: CheckState) -> dict:
-    i = state["inputs"]
-    check_tool = stage_tool(
-        "check_thermal",
-        "Run the thermal checks (dT/dt, d²T/dt², T_chem) on the recorded battery temperature and "
-        "charging duration. Takes no arguments.",
-        lambda: [asdict(r) for r in check_thermal(i["temperature_c"], i["duration_min"], cfg)],
-    )
-    return run_stage_agent(state, check_tool, "Check whether the battery has a thermal hazard right now.")
+    def thermal_node(state: RaceState) -> dict:      # all three rules always run (FR-2)
+        return explained(state, run_tool("check_thermal_tool", state["inputs"]), 2)
 
+    def prediction_node(state: RaceState) -> dict:   # missing or invalid input -> R6 (fail closed)
+        ...
 
-# ---- Agent 3: Prediction (stage 3) — R6 if the model is not validated, else R5 ----
-def prediction_node(state: CheckState) -> dict:
-    check_tool = stage_tool(
-        "check_efficiency",
-        "Check the efficiency model's quality gates, then predict efficiency for the recorded "
-        "reading and compare it with the minimum. Takes no arguments.",
-        lambda: [evaluate_prediction(state["inputs"], cfg)],
-    )
-    return run_stage_agent(state, check_tool, "Check the predicted efficiency for this race.")
+    def decision_node(state: RaceState) -> dict:     # no LLM: compute_verdict + template_message + comment
+        ...
 
+    # Routing reads stage_results, never LLM output
+    def route_after_overcharge(state: RaceState) -> str:
+        return "decision" if any_failed(state["stage_results"]) else "thermal"
 
-# ---- Agent 4: Race Decision — deterministic, no LLM for verdict/failures/summary ----
-def decision_node(state: CheckState) -> dict:
-    result = compute_verdict(state["stage_results"])
-    if result["verdict"] == "CAN_PROCEED":
-        summary = "CAN PROCEED into the race."
-    else:  # state every failed check reason
-        summary = "DO NOT PROCEED. " + " ".join(
-            template_message(f, state["inputs"], cfg) for f in result["failures"])
-    return {**result, "summary": summary}
+    def route_after_thermal(state: RaceState) -> str:
+        return "decision" if any_failed(state["stage_results"]) else "prediction"
 
-
-# ---- Routing reads stage_results, never LLM output ----
-def any_failed(results: list[dict]) -> bool:
-    return any(not r["passed"] for r in results)
-
-
-def route_after_overcharge(state: CheckState) -> str:
-    return "decision" if any_failed(state["stage_results"]) else "thermal"
-
-
-def route_after_thermal(state: CheckState) -> str:
-    return "decision" if any_failed(state["stage_results"]) else "prediction"
-
-
-graph = StateGraph(CheckState)
-graph.add_node("overcharge", overcharge_node)
-graph.add_node("thermal", thermal_node)
-graph.add_node("prediction", prediction_node)
-graph.add_node("decision", decision_node)
-graph.add_edge(START, "overcharge")
-graph.add_conditional_edges("overcharge", route_after_overcharge, {"thermal": "thermal", "decision": "decision"})
-graph.add_conditional_edges("thermal", route_after_thermal, {"prediction": "prediction", "decision": "decision"})
-graph.add_edge("prediction", "decision")
-graph.add_edge("decision", END)
-app = graph.compile()
-
-final_state = app.invoke({
-    "inputs": {"voltage_v": 5.0, "current_a": -1.2, "temperature_c": 25.0, "duration_min": 60},
-    "stage_results": [], "explanations": [], "verdict": None, "failures": [], "summary": "",
-})
-print(final_state["verdict"], "-", final_state["summary"])
+    graph = StateGraph(RaceState)
+    graph.add_node("overcharge", overcharge_node)
+    graph.add_node("thermal", thermal_node)
+    graph.add_node("prediction", prediction_node)
+    graph.add_node("decision", decision_node)
+    graph.add_edge(START, "overcharge")
+    graph.add_conditional_edges("overcharge", route_after_overcharge, {"thermal": "thermal", "decision": "decision"})
+    graph.add_conditional_edges("thermal", route_after_thermal, {"prediction": "prediction", "decision": "decision"})
+    graph.add_edge("prediction", "decision")
+    graph.add_edge("decision", END)
+    return graph.compile()
 ```
 
-Nodes return **partial updates** (a dict with only the keys they change). LangGraph merges them into the state. Each stage makes at least two LLM calls (tool call, then explanation), so keep `num_predict` short to stay within NFR-1.
+Nodes return **partial updates** (a dict with only the keys they change). LangGraph merges them into the state. See `agents.py` for the full `explain`, `prediction_node` and `decision_node`. Run it with `run_race_assessment(inputs)`. At most one LLM call per failed record, so NFR-1 holds with `num_predict` about 150.
 
 ### 4. Template B: a follow-up Q&A agent (never for the verdict)
 Use this for an extra, optional agent outside the check pipeline. For example, an engineer asks "why did this fail?" after the verdict is shown. The tools must be **read-only wrappers around deterministic code**. The answer is display text and must never change `verdict` or `failures`.
@@ -259,9 +195,9 @@ On LangGraph ≥ 1.0, `create_react_agent` still works but raises `LangGraphDepr
 ## Key Architectural Concepts
 
 - **`@tool` decorator:** turns a normal Python function into a schema (name, typed arguments, description) that LangGraph passes directly to Ollama. The **triple-quoted docstring** is the instruction the LLM reads to decide *when and why* to pick this tool, so write it for the model: say what the tool returns, the units, and when to use it. The type hints become the argument schema.
-- **`create_react_agent`** (from `langgraph.prebuilt`): replaces building the graph by hand for a standard tool loop. It sets up a `StateGraph` with an **Agent node** (the model decides what to do next) and a **Tool node** (`ToolNode`, which runs the chosen function), joined by a conditional edge. The loop is: if the model's last message has tool calls, go to the Tool node, then back to the Agent node; otherwise stop. In Template A each stage node wraps one `create_react_agent` with one no-argument tool, and the node, not the agent, writes `stage_results` from the tool artifact. In Template B the agent can pick freely among read-only tools. In LangGraph 1.x it still works but gives a `LangGraphDeprecatedSinceV10` warning. The replacement is `from langchain.agents import create_agent`, which needs the separate `langchain` package (not installed here). The warning is safe to ignore until LangGraph 2.0.
-- **`response_format="content_and_artifact"`:** the tool returns `(content, artifact)`. The LLM only sees `content`; the `ToolMessage.artifact` keeps the exact Python result for code to read. This is how a stage node gets the check result without trusting LLM text.
-- **State management:** in `create_react_agent`, LangGraph keeps a `messages` list in the conversation state. When the model decides it needs a tool, it appends an `AIMessage` with `tool_calls`. The Tool node runs the function and appends the output as a `ToolMessage`. The whole sequence is sent back to the LLM, which writes the final reply. In Template A each stage agent's `messages` stay inside its node; the outer graph state is the explicit `CheckState` TypedDict: each node returns the keys it updates, and routing functions read those keys.
+- **`create_react_agent`** (from `langgraph.prebuilt`): replaces building the graph by hand for a standard tool loop. It sets up a `StateGraph` with an **Agent node** (the model decides what to do next) and a **Tool node** (`ToolNode`, which runs the chosen function), joined by a conditional edge. The loop is: if the model's last message has tool calls, go to the Tool node, then back to the Agent node; otherwise stop. It is used only in Template B, where the agent can pick freely among read-only tools. It is never used in the check pipeline. In LangGraph 1.x it still works but gives a `LangGraphDeprecatedSinceV10` warning. The replacement is `from langchain.agents import create_agent`, which needs the separate `langchain` package (not installed here). The warning is safe to ignore until LangGraph 2.0.
+- **Invoking a tool in code:** `check_thermal_tool.invoke({"temperature_c": 30.0, "duration_min": 1})` validates the arguments against the schema and returns the function's Python result unchanged. `tool.args` lists the argument names, which is how `run_tool` picks them out of `state["inputs"]`.
+- **State management:** in `create_react_agent`, LangGraph keeps a `messages` list in the conversation state. When the model decides it needs a tool, it appends an `AIMessage` with `tool_calls`. The Tool node runs the function and appends the output as a `ToolMessage`. The whole sequence is sent back to the LLM, which writes the final reply. This applies to Template B only. The check pipeline has no `messages`; its state is the explicit `RaceState` TypedDict, each node returns the keys it updates, and routing functions read those keys.
 - **`ChatOllama(...)`:** the only way to create the LLM in this repo. It needs a running `ollama serve` and a model that has been pulled.
 
 ## Verification Checklist
@@ -271,12 +207,12 @@ Before finishing any agent change:
 - [ ] Test AG-1: with the LLM mocked to say "PROCEED" on S1-1 inputs, the verdict is still `DO_NOT_PROCEED`
 - [ ] Test AG-2: with Ollama stopped or timing out, the graph still returns the `compute_verdict` result using template messages
 - [ ] Test AG-3: every failure includes the recorded value(s) and threshold(s)
-- [ ] With the LLM mocked to never call the tool, every stage still runs its check and the verdict is unchanged
+- [ ] A stage that passes makes no LLM call; each failed record makes at most one
 - [ ] `uv run pytest` passes
 
 ## Prohibited Behaviors
 - **NEVER** let an LLM output set `verdict`, `failures`, or a routing decision.
-- **NEVER** give a stage tool arguments the LLM fills in, or read a check result from LLM text instead of the tool artifact.
-- **NEVER** let a stage end without its check result: if the agent didn't call the tool, run it in code.
+- **NEVER** let the LLM call a pipeline check tool or fill in its arguments, or read a check result from LLM text.
+- **NEVER** wrap a pipeline stage in `create_react_agent`; the node invokes its tool in code (spec/04-agents.md §3.3).
 - **NEVER** call a hosted LLM API.
 - **NEVER** hard-code thresholds in prompts or tool docstrings. Fetch them at runtime.

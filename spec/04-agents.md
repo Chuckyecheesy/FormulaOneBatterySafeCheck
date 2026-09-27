@@ -86,7 +86,7 @@ class CheckState(TypedDict):
 
 Every agent node follows the same two steps:
 
-1. **Call the tool in code** (for example `check_thermal(...)`) and append its result to `stage_results`. The LLM never makes this call and never sees raw inputs without the tool result.
+1. **Call the tool in code** (for example `check_thermal(...)`) and append its result to `stage_results`. The LLM never makes this call and never sees raw inputs without the tool result. Each check is wrapped as a LangChain `@tool` (`make_check_tools(cfg)` in `agents.py`), and the node invokes it with arguments taken from the graph inputs, not through a tool-calling agent loop.
 2. **Ask Ollama to explain** the tool result, based on the recorded value and its threshold. The prompt contains the tool result as JSON, with thresholds filled in from `thresholds.yaml`. The LLM's text goes into `explanations` only. It is never read back into `verdict` or `failures`. The prompt tells the model not to mention rule IDs or reason codes, since the explanation is returned by the API in plain language. The web UI does not display it (see [05-ui.md](05-ui.md) §4).
 
 Routing functions for the conditional edges read `stage_results`, not LLM output.
