@@ -41,7 +41,7 @@ The operator enters exactly five values:
 - **FR-4** The model's quality gates ([03-ml-model.md](03-ml-model.md) §5) are checked at training time, and only a model that passes them is deployed. Stage 3 does not re-check them at runtime. If the model cannot produce a prediction (missing model file, non-finite result, missing input), the check returns an error and **no verdict**, never `CAN PROCEED`.
 - **FR-5** `CAN PROCEED` is returned only when every stage passes.
 - **FR-6** All thresholds are loaded from `thresholds.yaml`. No threshold appears as a literal in code or prompts.
-- **FR-7** Every check is logged with its inputs, calculated values, stage results, model version, and timestamp, so that each decision can be audited.
+- **FR-7** Every check is logged with its inputs, calculated values, stage results, model version, and timestamp, so that each decision can be audited. `run_race_assessment` appends one strict-JSON line per check to `logs/audit.jsonl` (override with `FORMULATECH_AUDIT_LOG`). Fields: `timestamp` (UTC), `check_id`, `outcome` (`verdict` or `error`), `inputs`, `t_seconds`, `calculated`, `stage_results`, `model_version`, `verdict`, `failed_codes`, `comment`, `llm_explanations`, `error`. Non-finite values are written as the strings `"Infinity"`, `"-Infinity"` or `"NaN"`. A check that ends without a verdict (FR-4) is still logged, with the stage results up to the error. If the log cannot be written, the error is logged and the verdict is still returned.
 - **FR-8** The final verdict is computed **deterministically in code**. AI agents explain and summarise it, but they cannot change it (see [04-agents.md](04-agents.md)).
 
 ## 4. Non-functional requirements

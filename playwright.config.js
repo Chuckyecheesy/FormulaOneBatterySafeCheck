@@ -22,6 +22,8 @@ module.exports = defineConfig({
     // The page renders the deterministic verdict, not the explanation text.
     env: {
       OLLAMA_URL: "http://127.0.0.1:9",
+      // Keep e2e audit records out of logs/audit.jsonl.
+      FORMULATECH_AUDIT_LOG: "test-results/audit.jsonl",
     },
   },
 });

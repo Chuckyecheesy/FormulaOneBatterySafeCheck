@@ -11,7 +11,9 @@ import json
 import logging
 import math
 import re
+import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any, Callable, TypedDict
 
 import pandas as pd
@@ -20,9 +22,10 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, StateGraph
 from xgboost import XGBRegressor
 
+from formulatech.audit import write_audit_record
 from formulatech.config import MODELS_DIR, load_thresholds
 from formulatech.ml.train import FEATURES
-from formulatech.rules import COMPARE_DECIMALS, check_overcharge, check_thermal
+from formulatech.rules import COMPARE_DECIMALS, SECONDS_PER_MINUTE, check_overcharge, check_thermal
 
 logger = logging.getLogger(__name__)
 
@@ -369,11 +372,38 @@ def build_race_graph(
     return graph.compile()
 
 
+def _audit_record(state: RaceState, inputs: dict[str, float], error: str | None) -> dict[str, Any]:
+    """FR-7 record: inputs, calculated values, stage results, model version and timestamp."""
+    results = state["stage_results"]
+    duration = inputs.get("duration_min")
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "check_id": uuid.uuid4().hex,
+        "outcome": "error" if error else "verdict",
+        "inputs": inputs,
+        "t_seconds": duration * SECONDS_PER_MINUTE if isinstance(duration, (int, float)) else None,
+        "calculated": {k: v for r in results if r["recorded_kind"] == "calculated" for k, v in r["recorded"].items()},
+        "stage_results": [
+            {k: r.get(k) for k in ("stage", "rule", "code", "passed", "recorded", "thresholds", "unit")}
+            for r in results
+        ],
+        "model_version": get_model_version(),
+        "verdict": state.get("verdict"),
+        "failed_codes": [f["code"] for f in state.get("failures", [])],
+        "comment": state.get("comment", ""),
+        "llm_explanations": state["explanations"],  # display text only; kept to audit LLM disagreements
+        "error": error,
+    }
+
+
 def run_race_assessment(inputs: dict[str, float], *, graph=None) -> RaceState:
-    """Execute the graph for a single, already-validated battery reading."""
+    """Execute the graph for a single, already-validated battery reading, and audit it (FR-7).
+
+    Streams the state so that, if Stage 3 cannot predict, the Stage 1-2 results are still audited.
+    """
     if graph is None:
         graph = build_race_graph()
-    return graph.invoke({
+    state: RaceState = {
         "inputs": inputs,
         "stage_results": [],
         "explanations": [],
@@ -381,4 +411,12 @@ def run_race_assessment(inputs: dict[str, float], *, graph=None) -> RaceState:
         "failures": [],
         "summary": "",
         "comment": "",
-    })
+    }
+    try:
+        for state in graph.stream(state, stream_mode="values"):
+            pass
+    except Exception as exc:
+        write_audit_record(_audit_record(state, inputs, error=f"{type(exc).__name__}: {exc}"))
+        raise
+    write_audit_record(_audit_record(state, inputs, error=None))
+    return state
