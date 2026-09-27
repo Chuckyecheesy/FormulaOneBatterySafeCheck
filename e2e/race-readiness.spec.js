@@ -112,7 +112,7 @@ test("a clean reading can proceed", async ({ page }) => {
   const result = page.locator("#result");
   await expect(result.getByRole("heading", { name: "CAN PROCEED" })).toBeVisible();
   await expect(result.getByText("All safety checks passed.")).toBeVisible();
-  await expect(result.getByText("Predicted efficiency: 98.3 %")).toBeVisible();
+  await expect(result.getByText(/Predicted efficiency/)).toHaveCount(0);
   await expect(page.locator("#stages [data-stage='1']")).toHaveClass("passed");
   await expect(page.locator("#stages [data-stage='2']")).toHaveClass("passed");
   await expect(page.locator("#stages [data-stage='3']")).toHaveClass("passed");

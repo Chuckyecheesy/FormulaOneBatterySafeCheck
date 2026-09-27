@@ -143,9 +143,6 @@ function renderResult(data) {
       el("h2", {}, "✅ CAN PROCEED"),
       el("p", {}, "All safety checks passed."),
     );
-    if (data.predicted_efficiency_pct != null) {
-      banner.append(el("p", {}, `Predicted efficiency: ${data.predicted_efficiency_pct.toFixed(1)} %`));
-    }
     resultEl.append(banner);
     return;
   }
