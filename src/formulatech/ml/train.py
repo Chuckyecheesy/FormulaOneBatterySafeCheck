@@ -51,10 +51,10 @@ BASE_PARAMS = {
 # §4 tuning grid, scored by 5-fold CV R² on the train split only.
 PARAM_GRID = {
     "learning_rate": [0.03, 0.05, 0.075, 0.1],
-    "max_depth": [3,4,5],
-    "min_child_weight": [1,3,5, 10],
-    "reg_lambda": [0.0, 1.0, 5.0],
-    "reg_alpha": [0.0, 0.1, 0.5, 1.0],
+    "max_depth": [2,3,4],
+    "min_child_weight": [1,3,5],
+    "reg_lambda": [10],
+    "reg_alpha": [1.0]
 }
 
 MODEL_FILE = "efficiency_model.json"

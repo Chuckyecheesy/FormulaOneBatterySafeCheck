@@ -43,7 +43,7 @@ Message templates are in [05-ui.md](05-ui.md) §3.1.
 
 - Library: `xgboost` (`XGBRegressor`), `objective="reg:squarederror"`.
 - Starting hyperparameters: `n_estimators=5000` with `early_stopping_rounds=50` on a validation slice (15%) of the training split, `learning_rate=0.05`, `subsample=0.8`, `colsample_bytree=0.8`, `reg_lambda=10`, `reg_alpha=1`.
-- Tuning: grid search scored by 5-fold CV R² on the train split only, over `learning_rate` ∈ {0.03, 0.05, 0.075, 0.1}, `max_depth` ∈ {3, 4, 5}, `min_child_weight` ∈ {1, 3, 5, 10}, `reg_lambda` ∈ {0, 1, 5}, `reg_alpha` ∈ {0, 0.1, 0.5, 1}. Tuned values override the starting ones.
+- Tuning: grid search scored by 5-fold CV R² on the train split only, over `learning_rate` ∈ {0.03, 0.05, 0.075, 0.1}, `max_depth` ∈ {2, 3, 4}, `min_child_weight` ∈ {1, 3, 5}, `reg_lambda` = 10, `reg_alpha` = 1. Tuned values override the starting ones.
 - Artifact saved with: model file, feature list and order, training data hash, hyperparameters, all metrics from §5, and the training timestamp.
 
 ## 5. Quality gates (all three must pass before the model is used for decisions)
@@ -72,6 +72,8 @@ Underfitting is ruled out by the R² gate (§5.2) and the CV mean: a model that 
 Train R², the gap `R²_train − R²_test`, and the early-stopping best iteration are saved and reported **for information only**. Early stopping still ends training when validation loss stops improving; it just does not pass or fail the model. There is no `fit_r2_gap_min` or `fit_r2_gap_max` gate and no `good_fit` label. A small gap simply means the model generalises well; with test R² > 0.90 the gap is expected to stay below 0.10.
 
 A learning-curve plot (train vs validation RMSE by boosting round, with validation taken from the training split) is saved with each artifact for manual review.
+
+Further overfitting / underfitting diagnostics are available with `python -m formulatech.ml.diagnose` (information only): train/validation/test RMSE, mean and linear baselines, error by training-set size, and error by `max_depth`. Results go to `models/`.
 
 ### 5.4 Gate outcome
 
