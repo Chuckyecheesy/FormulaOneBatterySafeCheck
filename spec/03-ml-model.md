@@ -75,6 +75,16 @@ A learning-curve plot (train vs validation RMSE by boosting round, with validati
 
 ### 5.4 Gate outcome
 
+The gate logic depends **only** on R² test, CV R² and tolerance accuracy:
+
+```
+gates_passed = (tolerance_accuracy > 80)
+           and (R²_test > 0.90)
+           and (CV_R²_mean > 0.90 and CV_R²_std ≤ 0.03)
+```
+
+Train R², the train − test R² gap and the early-stopping best iteration never affect `gates_passed`.
+
 - All gates pass → `gates_passed = true`, and the model may be deployed.
 - Any gate fails → `gates_passed = false`. The model can still be stored for analysis, but at runtime Stage 3 returns **R6** (fail closed, FR-4).
 

@@ -28,6 +28,16 @@ A trained model may only be used for stage 3 if it passes all three accuracy gat
 
 Train R², the train − test R² gap and the early-stopping best iteration are reported for information only; they are not gates. There is no `fit_r2_gap_min` or `fit_r2_gap_max` gate, and no `good_fit` pass/fail label.
 
+**Gate logic depends only on R² test, CV R² and tolerance accuracy:**
+
+```
+gates_passed = (tolerance_accuracy > 80)
+           and (R²_test > 0.90)
+           and (CV_R²_mean > 0.90 and CV_R²_std ≤ 0.03)
+```
+
+No other metric can pass or fail the model.
+
 If any gate fails, stage 3 returns R6 `MODEL_NOT_VALIDATED` and the verdict is DO NOT PROCEED.
 
 ## Rule logic
