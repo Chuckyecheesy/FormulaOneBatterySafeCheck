@@ -38,7 +38,7 @@ gates_passed = (tolerance_accuracy > 80)
 
 No other metric can pass or fail the model.
 
-The gates are checked when the model is trained (`uv run python -m formulatech.ml.train`), and the developer only deploys a model that passes. The app assumes the deployed model has passed them and does **not** check them at runtime; there is no `MODEL_NOT_VALIDATED` rule. If the model cannot produce a prediction at all (missing file, non-finite result), the check returns an error and **no verdict**, never CAN PROCEED.
+The gates are checked when the model is trained (`uv run python -m formulatech.ml.train`). Only a passing model is saved to `models/`; a failing one goes to `models/rejected/` and the script exits with status 1. The app assumes the deployed model has passed them and does **not** check them at runtime; there is no `MODEL_NOT_VALIDATED` rule. If the model cannot produce a prediction at all (missing file, non-finite result), the check returns an error and **no verdict**, never CAN PROCEED.
 
 ## Rule logic
 

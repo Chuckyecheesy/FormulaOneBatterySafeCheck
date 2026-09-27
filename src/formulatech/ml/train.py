@@ -60,6 +60,8 @@ PARAM_GRID = {
 MODEL_FILE = "efficiency_model.json"
 META_FILE = "efficiency_model_meta.json"
 CURVE_FILE = "learning_curve.png"
+# A model that fails any gate is saved here, never over the deployed model in out_dir (§5).
+REJECTED_DIR = "rejected"
 
 
 def load_data(path: Path = DATA_PATH) -> tuple[pd.DataFrame, pd.Series]:
@@ -136,8 +138,22 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _replace_file(path: Path, write) -> None:
+    """Write to a temporary file next to `path`, then swap it in, so `path` is never half-written.
+
+    The temp name keeps the real extension last: XGBoost picks the save format from it.
+    """
+    tmp = path.with_name(f"{path.stem}.tmp{path.suffix}")
+    write(tmp)
+    tmp.replace(path)
+
+
 def train(data_path: Path = DATA_PATH, out_dir: Path = MODELS_DIR) -> dict:
-    """Run the full pipeline and save the artifact. Returns the metadata written to disk."""
+    """Run the full pipeline and save the artifact. Returns the metadata written to disk.
+
+    Only a model that passes every gate is saved to `out_dir`, where the app loads it. A failing
+    model goes to `out_dir / REJECTED_DIR` for analysis, and the deployed model is left untouched.
+    """
     gates_cfg = load_thresholds()["model_gates"]
     X, y = load_data(data_path)
     X_train, X_test, y_train, y_test = split_data(X, y)
@@ -165,9 +181,8 @@ def train(data_path: Path = DATA_PATH, out_dir: Path = MODELS_DIR) -> dict:
     }
     gates = evaluate_gates(metrics, gates_cfg)
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    model.save_model(out_dir / MODEL_FILE)
-    save_learning_curve(model, out_dir / CURVE_FILE)
+    dest = out_dir if gates["gates_passed"] else out_dir / REJECTED_DIR
+    dest.mkdir(parents=True, exist_ok=True)
     meta = {
         "version": datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
         "trained_at": datetime.now(timezone.utc).isoformat(),
@@ -182,8 +197,13 @@ def train(data_path: Path = DATA_PATH, out_dir: Path = MODELS_DIR) -> dict:
         "metrics": metrics,
         "gates": gates,
         "gates_passed": gates["gates_passed"],
+        "deployed": gates["gates_passed"],
+        "saved_to": str(dest),
     }
-    (out_dir / META_FILE).write_text(json.dumps(meta, indent=2))
+    # Model first, then metadata: the app reads the version from the metadata.
+    _replace_file(dest / MODEL_FILE, lambda tmp: model.save_model(tmp))
+    _replace_file(dest / META_FILE, lambda tmp: tmp.write_text(json.dumps(meta, indent=2)))
+    save_learning_curve(model, dest / CURVE_FILE)
     return meta
 
 
@@ -201,9 +221,14 @@ def print_report(meta: dict) -> None:
     print(f"  R² train: {m['r2_train']:.4f}, train − test R² gap: {m['r2_gap']:.4f}")
     print(f"  Early stopping: best iteration {m['best_iteration']} of {m['n_estimators']}")
     print(f"\ngates_passed = {meta['gates_passed']}")
-    if not meta["gates_passed"]:
-        print("Do not deploy this model: it failed the acceptance gates (spec/03-ml-model.md §5).")
+    if meta["gates_passed"]:
+        print(f"Model deployed to {meta['saved_to']}.")
+    else:
+        print(f"Model REJECTED: it failed the acceptance gates (spec/03-ml-model.md §5). Saved to "
+              f"{meta['saved_to']} for analysis; the deployed model was not changed.")
 
 
 if __name__ == "__main__":
-    print_report(train())
+    meta = train()
+    print_report(meta)
+    raise SystemExit(0 if meta["gates_passed"] else 1)

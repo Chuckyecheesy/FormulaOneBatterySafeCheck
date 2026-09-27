@@ -1,5 +1,7 @@
 """Model quality tests (spec/06-test-cases.md, MQ-1 to MQ-5)."""
 
+import json
+
 import numpy as np
 import pytest
 from sklearn.metrics import r2_score
@@ -72,3 +74,48 @@ def test_fit_with_early_stopping_allows_tuned_learning_rate():
     )
     assert model is not None
     assert len(model.predict(X.iloc[:10])) == 10
+
+
+@pytest.fixture
+def fast_train(monkeypatch):
+    """train() without the grid search; the gate result is forced per test."""
+    from formulatech.ml import train as train_mod
+
+    monkeypatch.setattr(train_mod, "tune", lambda X, y, folds: (
+        {"learning_rate": 0.1, "max_depth": 3, "min_child_weight": 1}, [0.95] * folds, []))
+
+    def run(out_dir, passed):
+        monkeypatch.setattr(train_mod, "evaluate_gates", lambda m, cfg: {
+            "tolerance_accuracy": passed, "r2": passed, "cv_stability": passed, "gates_passed": passed})
+        return train_mod.train(out_dir=out_dir)
+
+    return train_mod, run
+
+
+def test_failing_model_never_overwrites_the_deployed_model(fast_train, tmp_path):
+    train_mod, run = fast_train
+    deployed_model, deployed_meta = tmp_path / train_mod.MODEL_FILE, tmp_path / train_mod.META_FILE
+    deployed_model.write_text("DEPLOYED MODEL")
+    deployed_meta.write_text('{"version": "deployed"}')
+
+    meta = run(tmp_path, passed=False)
+
+    assert deployed_model.read_text() == "DEPLOYED MODEL"
+    assert deployed_meta.read_text() == '{"version": "deployed"}'
+    rejected = tmp_path / train_mod.REJECTED_DIR
+    assert (rejected / train_mod.MODEL_FILE).exists()
+    assert json.loads((rejected / train_mod.META_FILE).read_text())["deployed"] is False
+    assert meta["saved_to"] == str(rejected)
+    assert not list(tmp_path.rglob("*.tmp.*"))
+
+
+def test_passing_model_is_deployed(fast_train, tmp_path):
+    train_mod, run = fast_train
+    meta = run(tmp_path, passed=True)
+
+    assert meta["deployed"] is True and meta["saved_to"] == str(tmp_path)
+    json.loads((tmp_path / train_mod.MODEL_FILE).read_text())  # saved as JSON, not UBJSON
+    loaded = train_mod.XGBRegressor()
+    loaded.load_model(str(tmp_path / train_mod.MODEL_FILE))
+    assert json.loads((tmp_path / train_mod.META_FILE).read_text())["version"] == meta["version"]
+    assert not (tmp_path / train_mod.REJECTED_DIR).exists()

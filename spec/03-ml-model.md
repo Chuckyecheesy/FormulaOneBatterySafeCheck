@@ -86,8 +86,8 @@ gates_passed = (tolerance_accuracy > 80)
 
 Train R², the train − test R² gap and the early-stopping best iteration never affect `gates_passed`.
 
-- All gates pass → `gates_passed = true`, and the model may be deployed.
-- Any gate fails → `gates_passed = false`. The model can still be stored for analysis, but it must not be deployed. This is the developer's check at training time; the app does not re-check the gates at runtime (FR-4).
+- All gates pass → `gates_passed = true`, and the training script saves the model to `models/`, where the app loads it.
+- Any gate fails → `gates_passed = false`. The training script saves the model, metadata and learning curve to `models/rejected/` for analysis, leaves the deployed model in `models/` unchanged, and exits with status 1. The app does not re-check the gates at runtime (FR-4), so this is the only gate.
 
 ## 6. Inference
 
