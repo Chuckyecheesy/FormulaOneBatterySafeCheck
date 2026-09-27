@@ -1,47 +1,94 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 220" role="img" aria-label="Race car on fire">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" preserveAspectRatio="xMidYMax slice" role="img" aria-label="Formula One car with its battery on fire">
   <defs>
-    <radialGradient id="glow" cx="50%" cy="60%" r="60%">
-      <stop offset="0%" stop-color="#ffb347" stop-opacity="0.9"/>
-      <stop offset="60%" stop-color="#ff5a1f" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#2a0d05" stop-opacity="0"/>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffb347" stop-opacity="0.45"/>
+      <stop offset="60%" stop-color="#ff7a2f" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#ff7a2f" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="flame" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0%" stop-color="#ff3b00"/>
-      <stop offset="55%" stop-color="#ff9500"/>
-      <stop offset="100%" stop-color="#ffe066"/>
+      <stop offset="0%" stop-color="#f26a1b"/>
+      <stop offset="60%" stop-color="#f7a33a"/>
+      <stop offset="100%" stop-color="#ffd27a"/>
+    </linearGradient>
+    <linearGradient id="flame-core" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ffb04a"/>
+      <stop offset="100%" stop-color="#ffe9a8"/>
     </linearGradient>
   </defs>
 
+  <!-- light grey backdrop -->
+  <rect width="1200" height="700" fill="#e9eaec"/>
+  <circle cx="330" cy="260" r="260" fill="#e1e2e5"/>
+  <circle cx="930" cy="230" r="220" fill="#e4e5e8"/>
+
+  <!-- track -->
+  <rect y="560" width="1200" height="140" fill="#dcdde0"/>
+  <line x1="0" y1="560" x2="1200" y2="560" stroke="#b9bbc0" stroke-width="3"/>
+  <g stroke="#c4c6ca" stroke-width="3" stroke-linecap="round">
+    <line x1="60" y1="610" x2="230" y2="610"/>
+    <line x1="120" y1="650" x2="380" y2="650"/>
+    <line x1="1000" y1="620" x2="1150" y2="620"/>
+    <line x1="60" y1="685" x2="200" y2="685"/>
+  </g>
+  <ellipse cx="640" cy="560" rx="440" ry="12" fill="#c8cacd"/>
+
   <!-- fire glow -->
-  <ellipse cx="200" cy="130" rx="200" ry="110" fill="url(#glow)"/>
+  <ellipse cx="520" cy="420" rx="360" ry="260" fill="url(#glow)"/>
 
   <!-- smoke -->
-  <g fill="#3b3b3b" opacity="0.55">
-    <circle cx="170" cy="30" r="22"/>
-    <circle cx="205" cy="18" r="26"/>
-    <circle cx="240" cy="32" r="20"/>
+  <g fill="#9ea1a6" opacity="0.35">
+    <circle cx="470" cy="150" r="55"/>
+    <circle cx="540" cy="110" r="70"/>
+    <circle cx="620" cy="150" r="50"/>
+    <circle cx="560" cy="200" r="45"/>
   </g>
 
-  <!-- flames -->
-  <g fill="url(#flame)">
-    <path d="M150 140 C140 105 165 95 158 60 C185 85 190 105 182 140 Z"/>
-    <path d="M178 140 C168 95 200 80 196 38 C228 72 232 105 220 140 Z"/>
-    <path d="M214 140 C206 108 232 98 228 66 C252 92 256 115 246 140 Z"/>
+  <!-- car body (grey, wireframe style) -->
+  <g fill="#c9cacd" stroke="#a6a8ac" stroke-width="3" stroke-linejoin="round">
+    <!-- front wing -->
+    <path d="M150 545 L150 470 L170 470 L170 545 Z"/>
+    <!-- rear wing -->
+    <path d="M1100 545 L1100 440 L1115 440 L1115 545 Z"/>
+    <path d="M1030 500 L1110 500 L1110 515 L1030 515 Z"/>
+    <!-- nose + chassis -->
+    <path d="M190 520 L260 450 L470 430 L560 390 L720 390 L780 430 L1040 470 L1050 500 L1050 530 L190 530 Z"/>
+    <!-- cockpit -->
+    <path d="M760 420 L840 420 L850 440 L770 440 Z" fill="#e6e7e9"/>
+    <!-- sidepod line -->
+    <path d="M600 470 L960 490" fill="none"/>
   </g>
 
-  <!-- race car body -->
-  <g>
-    <path d="M40 160 L95 140 L150 132 L175 112 L230 112 L250 132 L330 138 L365 152 L365 170 L40 170 Z" fill="#b3261e"/>
-    <path d="M182 118 L224 118 L238 132 L170 132 Z" fill="#1c1e21"/>
-    <rect x="30" y="148" width="28" height="8" fill="#1c1e21"/>
-    <rect x="345" y="128" width="8" height="26" fill="#1c1e21"/>
-    <rect x="330" y="124" width="38" height="8" fill="#1c1e21"/>
-    <circle cx="105" cy="172" r="22" fill="#1c1e21"/>
-    <circle cx="105" cy="172" r="9" fill="#8a8f98"/>
-    <circle cx="300" cy="172" r="22" fill="#1c1e21"/>
-    <circle cx="300" cy="172" r="9" fill="#8a8f98"/>
+  <!-- exposed battery pack -->
+  <g fill="#b3b5b9" stroke="#8f9196" stroke-width="3">
+    <rect x="420" y="440" width="220" height="60" rx="4"/>
+    <rect x="432" y="452" width="30" height="40" rx="3" fill="#d6d7da"/>
+    <rect x="468" y="452" width="30" height="40" rx="3" fill="#d6d7da"/>
+    <rect x="504" y="452" width="30" height="40" rx="3" fill="#d6d7da"/>
+    <rect x="540" y="452" width="30" height="40" rx="3" fill="#d6d7da"/>
+    <rect x="576" y="452" width="30" height="40" rx="3" fill="#d6d7da"/>
+    <rect x="612" y="452" width="20" height="40" rx="3" fill="#d6d7da"/>
   </g>
 
-  <!-- ground -->
-  <rect x="0" y="194" width="400" height="4" fill="#3b3b3b" opacity="0.6"/>
+  <!-- flames from the battery -->
+  <g fill="url(#flame)" opacity="0.9">
+    <path d="M415 450 C395 390 440 360 425 290 C470 330 480 380 470 450 Z"/>
+    <path d="M460 450 C440 360 500 320 490 230 C550 290 560 360 540 450 Z"/>
+    <path d="M530 450 C515 380 560 340 555 270 C600 320 610 380 595 450 Z"/>
+    <path d="M585 450 C575 400 610 370 605 320 C640 360 650 410 640 450 Z"/>
+  </g>
+  <g fill="url(#flame-core)" opacity="0.85">
+    <path d="M445 450 C440 410 465 390 460 350 C485 380 490 415 480 450 Z"/>
+    <path d="M505 450 C495 400 525 370 520 320 C550 360 555 410 545 450 Z"/>
+    <path d="M565 450 C560 415 580 395 578 365 C600 395 605 425 598 450 Z"/>
+  </g>
+
+  <!-- wheels -->
+  <g fill="#b0b2b6" stroke="#909297" stroke-width="3">
+    <circle cx="290" cy="505" r="62"/>
+    <circle cx="930" cy="510" r="56"/>
+  </g>
+  <g fill="#cfd0d3">
+    <circle cx="290" cy="505" r="26"/>
+    <circle cx="930" cy="510" r="23"/>
+  </g>
 </svg>
