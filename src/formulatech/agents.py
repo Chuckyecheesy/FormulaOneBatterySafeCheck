@@ -135,7 +135,9 @@ def explain(llm: Any, result: dict[str, Any], fallback: str) -> str:
     prompt = (
         "Explain this battery safety check result to a race engineer in one or two sentences. "
         "Do not change the result. Include the recorded value(s) and threshold(s). "
-        "Do not mention rule IDs or reason codes.\n"
+        "Do not mention rule IDs or reason codes. "
+        "For T_chem, treat it as the temperature rise above the 25°C baseline, not the absolute battery temperature. "
+        "In other words, T_chem = max(0, T_t - 25°C).\n"
         f"RESULT_JSON={json.dumps(payload, default=str)}"
     )
     try:

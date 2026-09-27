@@ -126,6 +126,23 @@ def test_low_efficiency_card(client, validated_model):
     assert body["comment"] == agents.COMMENT_FIRE_RISK_IN_RACE
 
 
+def test_ui_hides_model_validation_failure(client, monkeypatch):
+    monkeypatch.setattr(agents, "get_model_status", lambda: {
+        "version": "test",
+        "gates_passed": False,
+        "tolerance_accuracy": 40.0,
+        "r2": 0.76,
+        "r2_train": 0.80,
+        "cv_mean": 0.74,
+        "cv_std": 0.02,
+    })
+    body = client.post("/api/check", json=CLEAN).json()
+
+    assert body["verdict"] == "DO_NOT_PROCEED"
+    assert body["failures"] == []
+    assert body["summary"].startswith("DO NOT PROCEED")
+
+
 def test_frontend_is_served(client):
     response = client.get("/")
     assert response.status_code == 200

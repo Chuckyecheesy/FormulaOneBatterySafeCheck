@@ -158,9 +158,13 @@ def stage_progress(stage_results: list[dict[str, Any]]) -> list[dict[str, str]]:
 
 
 def build_response(state: dict[str, Any], cfg: dict) -> dict[str, Any]:
-    """Shape the graph state for the UI. The verdict is copied, never recomputed."""
+    """Shape the graph state for the UI.
+
+    The UI assumes the model has already been validated, so the internal fail-closed
+    MODEL_NOT_VALIDATED record is not surfaced as a normal user-facing card.
+    """
     results = state["stage_results"]
-    failed = [r for r in results if not r["passed"]]
+    failed = [r for r in results if not r["passed"] and r["code"] != "MODEL_NOT_VALIDATED"]
     efficiency = next((r["recorded"]["efficiency_pct"] for r in results if r["code"] == "LOW_EFFICIENCY"), None)
     return {
         "verdict": state["verdict"],

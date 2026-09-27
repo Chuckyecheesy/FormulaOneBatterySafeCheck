@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from formulatech import agents
-from formulatech.agents import build_race_graph, run_race_assessment, template_message
+from formulatech.agents import build_race_graph, explain, run_race_assessment, template_message
 from formulatech.config import load_thresholds
 from formulatech.ml.train import FEATURES
 
@@ -93,6 +93,33 @@ def test_ag3_every_failure_has_recorded_values_and_thresholds():
     for failure in state["failures"]:
         assert failure["recorded"] and failure["thresholds"]
         assert failure["recorded"].keys() == failure["thresholds"].keys()
+
+
+def test_prompt_explains_tchem_as_rise_above_baseline():
+    seen = {}
+
+    class CapturingModel:
+        def invoke(self, prompt):
+            seen["prompt"] = prompt
+            class Response:
+                content = "ok"
+            return Response()
+
+    result = {
+        "rule": "R4",
+        "code": "HIGH_TCHEM",
+        "passed": False,
+        "recorded": {"T_chem": 1.0},
+        "recorded_kind": "calculated",
+        "thresholds": {"T_chem": "> 0.3"},
+        "reason": "Heat exposure to the surrounding environment is too high",
+    }
+    fallback = template_message(result, {"temperature_c": 26.0, "duration_min": 60}, load_thresholds())
+
+    explain(CapturingModel(), result, fallback)
+
+    assert "temperature rise above the 25°C baseline" in seen["prompt"]
+    assert "T_t - 25°C" in seen["prompt"]
 
 
 def test_summary_states_failed_check_reasons():
