@@ -115,7 +115,36 @@ button:disabled { background: var(--skip); cursor: not-allowed; }
 
 .comment { margin-top: 1rem; font-weight: 600; }
 
-details.explanations { margin-top: 1rem; font-size: 0.9rem; color: var(--muted); }
-details.explanations ul { padding-left: 1.2rem; }
+/* DO NOT PROCEED popup with burning-car backdrop */
+.popup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: radial-gradient(ellipse at center, rgba(120, 30, 5, 0.85), rgba(20, 5, 2, 0.92));
+}
+.popup-overlay.hidden { display: none; }
+.popup {
+  width: 100%;
+  max-width: 640px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--card);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.popup-art {
+  display: block;
+  width: 100%;
+  background: #1a0804;
+  border-radius: 10px 10px 0 0;
+  animation: flicker 1.2s ease-in-out infinite alternate;
+}
+@keyframes flicker { from { filter: brightness(1); } to { filter: brightness(1.2); } }
+.popup .banner { margin: 1rem; }
+.popup button { margin: 0 auto 1.25rem; }
 
 .request-error { color: var(--fail); }

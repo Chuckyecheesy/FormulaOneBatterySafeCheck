@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 220" role="img" aria-label="Race car on fire">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="60%" r="60%">
+      <stop offset="0%" stop-color="#ffb347" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#ff5a1f" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#2a0d05" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="flame" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ff3b00"/>
+      <stop offset="55%" stop-color="#ff9500"/>
+      <stop offset="100%" stop-color="#ffe066"/>
+    </linearGradient>
+  </defs>
+
+  <!-- fire glow -->
+  <ellipse cx="200" cy="130" rx="200" ry="110" fill="url(#glow)"/>
+
+  <!-- smoke -->
+  <g fill="#3b3b3b" opacity="0.55">
+    <circle cx="170" cy="30" r="22"/>
+    <circle cx="205" cy="18" r="26"/>
+    <circle cx="240" cy="32" r="20"/>
+  </g>
+
+  <!-- flames -->
+  <g fill="url(#flame)">
+    <path d="M150 140 C140 105 165 95 158 60 C185 85 190 105 182 140 Z"/>
+    <path d="M178 140 C168 95 200 80 196 38 C228 72 232 105 220 140 Z"/>
+    <path d="M214 140 C206 108 232 98 228 66 C252 92 256 115 246 140 Z"/>
+  </g>
+
+  <!-- race car body -->
+  <g>
+    <path d="M40 160 L95 140 L150 132 L175 112 L230 112 L250 132 L330 138 L365 152 L365 170 L40 170 Z" fill="#b3261e"/>
+    <path d="M182 118 L224 118 L238 132 L170 132 Z" fill="#1c1e21"/>
+    <rect x="30" y="148" width="28" height="8" fill="#1c1e21"/>
+    <rect x="345" y="128" width="8" height="26" fill="#1c1e21"/>
+    <rect x="330" y="124" width="38" height="8" fill="#1c1e21"/>
+    <circle cx="105" cy="172" r="22" fill="#1c1e21"/>
+    <circle cx="105" cy="172" r="9" fill="#8a8f98"/>
+    <circle cx="300" cy="172" r="22" fill="#1c1e21"/>
+    <circle cx="300" cy="172" r="9" fill="#8a8f98"/>
+  </g>
+
+  <!-- ground -->
+  <rect x="0" y="194" width="400" height="4" fill="#3b3b3b" opacity="0.6"/>
+</svg>
